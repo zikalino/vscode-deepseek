@@ -84,6 +84,21 @@
         "title": "DeepSeek: Browse Failed Requests"
       },
       {
+        "command": "deepseek.account.signIn",
+        "title": "Sign In for Free Tokens",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.account.showUsage",
+        "title": "Show Token Allowance",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.account.signOut",
+        "title": "Sign Out of Token Allowance",
+        "category": "DeepSeek"
+      },
+      {
         "command": "deepseek.advance.newChat",
         "title": "New Zero Chat",
         "category": "DeepSeek",
@@ -152,6 +167,16 @@
           "type": "string",
           "default": "deepseek-v4-flash",
           "description": "DeepSeek model name (e.g. deepseek-v4-pro, deepseek-v4-flash)."
+        },
+        "deepseek.account.githubClientId": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Client ID of a GitHub OAuth app used for device-flow sign-in. Create one under **Settings → Developer settings → OAuth Apps**, enable **Device Flow**, then paste the client ID here. Signing in requests only `read:user` and unlocks the hosted token allowance."
+        },
+        "deepseek.account.proxyUrl": {
+          "type": "string",
+          "default": "http://localhost:8787",
+          "description": "Base URL of the token-allowance proxy. It must serve POST /v1/session, GET /v1/usage and POST /v1/chat/completions (see server/)."
         },
         "deepseek-copilot.debugMode": {
           "type": "string",
@@ -239,6 +264,15 @@
         },
         {
           "command": "deepseek.clearApiKey"
+        },
+        {
+          "command": "deepseek.account.signIn"
+        },
+        {
+          "command": "deepseek.account.showUsage"
+        },
+        {
+          "command": "deepseek.account.signOut"
         },
         {
           "command": "deepseek.advance.newChat"

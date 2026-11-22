@@ -11,7 +11,7 @@
 
 ## Quick Start
 
-1. Set `deepseek.apiKey` in VS Code settings, or store the key in VS Code secret storage (the Zero panel's **Set Zero API Key** command uses the same secret).
+1. Set `deepseek.apiKey` in VS Code settings, or store the key in VS Code secret storage (the Zero panel's **Set Zero API Key** command uses the same secret). Alternatively, run **DeepSeek: Sign In for Free Tokens** to use the hosted monthly allowance described in [§2](#2-usage) — no DeepSeek key needed.
 2. Open VS Code Chat (`Ctrl+Shift+I`) and pick **DeepSeek V4 Flash** or **DeepSeek V4 Pro** from the model dropdown.
 3. Start asking questions or requesting code changes — DeepSeek works just like Copilot.
 
@@ -47,6 +47,23 @@
 API routing is handled automatically via the DeepSeek Copilot provider. No manual API key configuration is typically required.
 
 To point to a different API endpoint (e.g., a self-hosted proxy), set `deepseek.apiEndpoint` in settings.
+
+### Hosted Tokens (optional)
+
+Instead of a DeepSeek key, you can sign in with GitHub and use a monthly token allowance served by
+the quota proxy in [`server/`](server/README.md):
+
+- **Any signed-in account** gets the free allowance.
+- **Active GitHub Sponsors** of the maintainer get the larger allowance.
+
+Sign-in uses the GitHub OAuth **device flow** (no redirect URI, no client secret) and requests only
+`read:user`. The proxy verifies the identity server-side and meters usage by GitHub account; the
+DeepSeek key never reaches the extension. Without a session, the extension falls back to the key
+configured above, so signing in is never required.
+
+> The allowance is implemented entirely on the proxy — a counter in the extension could be edited.
+> Run the reference proxy with `DEEPSEEK_API_KEY=... node server/index.mjs`, then set
+> `deepseek.account.proxyUrl` and `deepseek.account.githubClientId`.
 
 ---
 
@@ -214,6 +231,15 @@ All settings are under the `deepseek.*` and `deepseek-copilot.*` namespaces.
 | `deepseek.apiEndpoint` | string | `https://api.deepseek.com/chat/completions` | API endpoint override. |
 | `deepseek.model` | string | `"deepseek-v4-flash"` | Model name to use. |
 
+### Hosted Token Allowance (`deepseek.account.*`)
+
+Optional. Requires the quota proxy in [`server/`](server/README.md).
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `deepseek.account.githubClientId` | string | `""` | Client ID of a GitHub OAuth app with **Device Flow** enabled. Used only for device-flow sign-in. |
+| `deepseek.account.proxyUrl` | string | `http://localhost:8787` | Base URL of the quota proxy (`POST /v1/session`, `GET /v1/usage`, `POST /v1/chat/completions`). |
+
 ### Copilot Debug Settings (`deepseek-copilot.*`)
 
 | Setting | Type | Default | Description |
@@ -259,6 +285,9 @@ Commands marked with 🔍 are accessible from the **F1 command palette**.
 | 🔍 `deepseek.advance.openWorkflowDocument` | DeepSeek: Open Workflow Document... | Open the chosen workflow's markdown source to review or edit. |
 | 🔍 `deepseek.advance.setApiKey` | DeepSeek: Set Zero API Key | Store or clear the API key used by the Zero panel. |
 | 🔍 `deepseek.advance.openSettings` | DeepSeek: Configure Zero | Open the `deepseek.advance.*` settings in VS Code. |
+| 🔍 `deepseek.account.signIn` | DeepSeek: Sign In for Free Tokens | GitHub device-flow sign-in; unlocks the hosted monthly allowance. |
+| 🔍 `deepseek.account.showUsage` | DeepSeek: Show Token Allowance | Show the tier, tokens used and reset date for the signed-in account. |
+| 🔍 `deepseek.account.signOut` | DeepSeek: Sign Out of Token Allowance | Forget the stored GitHub token and session. |
 
 ---
 

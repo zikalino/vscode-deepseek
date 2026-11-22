@@ -10,6 +10,7 @@ import {
 } from '../types';
 import { Logger } from '../logger';
 import { AuthManager } from '../auth';
+import { accountManager } from '../account/account';
 import { DeepSeekClient } from '../client/core';
 import {
   convertMessages,
@@ -80,6 +81,7 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
   private reasoningCache: Map<string, ReasoningEntry> = new Map();
   private prevMessages: readonly vscode.LanguageModelChatRequestMessage[] | undefined;
   private context: vscode.ExtensionContext;
+  private clientBaseUrl: string;
   private _onDidChange = new vscode.EventEmitter<void>();
 
   readonly onDidChangeLanguageModelChatInformation: vscode.Event<void> = this._onDidChange.event;
@@ -88,10 +90,8 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
     this.log = log;
     this.auth = auth;
     this.context = context;
-    this.client = new DeepSeekClient(
-      vscode.workspace.getConfiguration(SETTINGS_NS).get<string>('baseUrl', 'https://api.deepseek.com'),
-      log,
-    );
+    this.clientBaseUrl = this.configuredBaseUrl();
+    this.client = new DeepSeekClient(this.clientBaseUrl, log);
     this.replay = new ReplayEngine(log);
     this.stabilizer = new ToolStabilizer(log);
     this.dumper = new RequestDumper(context, log);
@@ -109,10 +109,7 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
             this.vision.resetCache();
           }
           if (e.affectsConfiguration(`${SETTINGS_NS}.baseUrl`)) {
-            this.client = new DeepSeekClient(
-              vscode.workspace.getConfiguration(SETTINGS_NS).get<string>('baseUrl', 'https://api.deepseek.com'),
-              this.log,
-            );
+            this.ensureClient(this.configuredBaseUrl());
           }
         }
         if (
@@ -130,6 +127,26 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
         this._onDidChange.fire();
       }),
     );
+
+    // A hosted session changes which endpoint and key the next request uses.
+    context.subscriptions.push(
+      accountManager(context).onDidChange(() => {
+        this._onDidChange.fire();
+      }),
+    );
+  }
+
+  private configuredBaseUrl(): string {
+    return vscode.workspace.getConfiguration(SETTINGS_NS).get<string>('baseUrl', 'https://api.deepseek.com');
+  }
+
+  /** Rebuild the client when a session (or the setting) changes the base URL. */
+  private ensureClient(baseUrl: string): DeepSeekClient {
+    if (this.clientBaseUrl !== baseUrl) {
+      this.clientBaseUrl = baseUrl;
+      this.client = new DeepSeekClient(baseUrl, this.log);
+    }
+    return this.client;
   }
 
   // ── provideLanguageModelChatInformation ─────────────────────
@@ -143,7 +160,7 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
     _options: vscode.PrepareLanguageModelChatModelOptions,
     _token: vscode.CancellationToken,
   ): Promise<vscode.LanguageModelChatInformation[]> {
-    const hasKey = await this.auth.getApiKey();
+    const hasKey = (await accountManager(this.context).getAccess()) !== undefined || (await this.auth.getApiKey()) !== undefined;
 
     return MODELS.map((model) => {
       const info: any = {
@@ -178,11 +195,16 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
     progress: vscode.Progress<vscode.LanguageModelResponsePart>,
     token: vscode.CancellationToken,
   ): Promise<void> {
-    // 1. Auth
-    const apiKey = await this.auth.getApiKey();
+    // 1. Auth: a hosted allowance session wins, otherwise the user's own key.
+    const account = await accountManager(this.context).getAccess();
+    const apiKey = account?.apiKey ?? (await this.auth.getApiKey());
     if (!apiKey) {
-      throw new Error('DeepSeek API key not configured. Run the "DeepSeek: Set API Key" command.');
+      throw new Error(
+        'DeepSeek API key not configured. Run "DeepSeek: Set API Key" or ' +
+          '"DeepSeek: Sign In for Free Tokens".',
+      );
     }
+    const client = this.ensureClient(account?.baseUrl ?? this.configuredBaseUrl());
 
     // 2. Model lookup
     const modelDef = MODELS.find((m) => m.id === modelInfo.id);
@@ -303,7 +325,7 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
       }
 
       // 10. Stream
-      await this.streamResponse(request, apiKey, modelDef, progress, token, segmentId, kind);
+      await this.streamResponse(client, request, apiKey, modelDef, progress, token, segmentId, kind);
     } else {
       // No tools — simplified path
       const request = await this.buildRequest(modelDef, visionMessages, deepseekTools, options, kind);
@@ -315,7 +337,7 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
         await this.dumper.dumpWireRequestPayload(segmentId, wireRequest);
         await this.dumper.dumpWireRequestLogFull(segmentId, this.client.formatWirePayload(wireRequest, false));
       }
-      await this.streamResponse(request, apiKey, modelDef, progress, token, segmentId, kind);
+      await this.streamResponse(client, request, apiKey, modelDef, progress, token, segmentId, kind);
     }
   }
 
@@ -438,6 +460,7 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
   }
 
   private async streamResponse(
+    client: DeepSeekClient,
     request: DeepSeekRequest,
     apiKey: string,
     modelDef: ModelDefinition,
@@ -541,7 +564,7 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
         },
       };
 
-      await this.client.streamChatCompletion(request, apiKey, callbacks, abortController.signal);
+      await client.streamChatCompletion(request, apiKey, callbacks, abortController.signal);
     } finally {
       this.dumper.dumpDeepSeekInFlat({
         model: request.model,

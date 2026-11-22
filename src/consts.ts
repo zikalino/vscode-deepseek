@@ -31,6 +31,15 @@ export const VSCODE_LM_VENDOR = 'deepseek';
 /** SecretStorage key for the DeepSeek API key */
 export const SECRET_KEY = 'deepseek.apiKey';
 
+/** SecretStorage key for the GitHub token obtained by the device flow. */
+export const SECRET_ACCOUNT_GITHUB_TOKEN = 'deepseek.account.githubToken';
+
+/** SecretStorage key for the quota-service session issued in exchange for the GitHub token. */
+export const SECRET_ACCOUNT_SESSION = 'deepseek.account.session';
+
+/** Default quota-service URL; `deepseek.account.proxyUrl` overrides it. */
+export const DEFAULT_ACCOUNT_PROXY_URL = 'http://localhost:8787';
+
 /** Settings namespace */
 export const SETTINGS_NS = 'deepseek';
 

@@ -18,6 +18,7 @@ import { Worker } from "node:worker_threads";
 import * as vscode from "vscode";
 
 import { SECRET_KEY } from "../consts";
+import { accountManager } from "../account/account";
 import { GitHubAuth } from "../githubAuth";
 import { setAdvanceBridge, type AdvanceBridge } from "./advanceBridge";
 import type { EngineOptions, EngineRequest, EngineResponse } from "./protocol";
@@ -266,7 +267,8 @@ class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
     this.stopEngine();
     const generation = this.generation;
     const config = advanceSettings();
-    const apiKey = await readApiKey(this.context);
+    const account = await accountManager(this.context).getAccess();
+    const apiKey = account?.apiKey ?? (await readApiKey(this.context));
     if (generation !== this.generation) {
       return;
     }
@@ -317,7 +319,7 @@ class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
       workflowTools: workflowCatalogue.tools,
       enabledTools: this.enabledTools,
       workflowItems: workflowCatalogue.items,
-      apiUrl: config.apiUrl,
+      apiUrl: account?.chatUrl ?? config.apiUrl,
       apiKey,
       model: config.model,
       allowWrite: config.allowWrite,
@@ -583,6 +585,8 @@ export function registerAdvancePanel(context: vscode.ExtensionContext): void {
     }),
     // Also covers a sign-out from VS Code's Accounts menu, which is the only stable sign-out UI.
     github.onDidChangeSessions(() => panel.scheduleRestart()),
+    // A hosted session changes the endpoint and key the next engine start uses.
+    accountManager(context).onDidChange(() => panel.scheduleRestart()),
     vscode.commands.registerCommand("deepseek.advance.setApiKey", async () => {
       const value = await vscode.window.showInputBox({
         title: "DeepSeek API key for the Zero panel",

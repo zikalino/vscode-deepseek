@@ -25,6 +25,7 @@ import type { EngineOptions, EngineRequest, EngineResponse } from "./protocol";
 import { readWorkflowDocument } from "./workflowFiles";
 import { discoverWorkflows, type WorkflowBrief } from "./workflows";
 import { runWorkflowDocument } from "./workflowRunner";
+import { accountManager } from "../account/account";
 
 const VIEW_TYPE = "deepseek.advanceWorkflow";
 
@@ -246,7 +247,8 @@ class WorkflowTab {
       return;
     }
     const config = advanceSettings();
-    const apiKey = await readApiKey(this.context);
+    const account = await accountManager(this.context).getAccess();
+    const apiKey = account?.apiKey ?? (await readApiKey(this.context));
     if (generation !== this.generation) {
       return;
     }
@@ -257,7 +259,7 @@ class WorkflowTab {
     const options: EngineOptions = {
       wasmPath,
       workspace: this.root.fsPath,
-      apiUrl: config.apiUrl,
+      apiUrl: account?.chatUrl ?? config.apiUrl,
       apiKey,
       model: config.model,
       allowWrite: config.allowWrite,
