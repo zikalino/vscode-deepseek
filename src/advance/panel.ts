@@ -76,6 +76,8 @@ class Panel implements vscode.WebviewViewProvider {
   private restartTimer: NodeJS.Timeout | undefined;
   /** The last theme the webview computed, replayed to every fresh engine instance. */
   private theme: Record<string, unknown> | undefined;
+  /** The last canvas size the webview reported, replayed to every fresh engine instance. */
+  private size: { width: number; height: number } | undefined;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -149,9 +151,14 @@ class Panel implements vscode.WebviewViewProvider {
         this.send(message as EngineRequest);
         return;
       }
-      case "resize":
+      case "resize": {
+        const size = message as { width?: unknown; height?: unknown };
+        if (typeof size.width === "number" && typeof size.height === "number") {
+          this.size = { width: size.width, height: size.height };
+        }
         this.send(message as EngineRequest);
         return;
+      }
       default:
         return;
     }
@@ -187,6 +194,9 @@ class Panel implements vscode.WebviewViewProvider {
     }
 
     this.stopEngine();
+    // A fresh engine replaces the whole conversation. Clear the old frame first: if the new engine
+    // cannot start, the user sees an empty panel and the status, not the conversation they left.
+    void this.view?.webview.postMessage({ type: "clear" });
     const options: EngineOptions = {
       wasmPath,
       workspace: root.fsPath,
@@ -198,6 +208,8 @@ class Panel implements vscode.WebviewViewProvider {
       commandTimeoutMs: config.commandTimeoutMs,
       pricing: config.pricing,
       theme: this.theme,
+      width: this.size?.width,
+      height: this.size?.height,
     };
     const worker = new Worker(
       path.join(this.context.extensionPath, "out", "advance", "engine-worker.js"),
@@ -205,10 +217,17 @@ class Panel implements vscode.WebviewViewProvider {
     );
     this.worker = worker;
     worker.on("message", (message: EngineResponse) => {
+      // terminate() does not recall a message already on its way, and a replaced worker must not
+      // paint its conversation over its successor.
+      if (this.worker !== worker) {
+        return;
+      }
       void this.onEngine(message);
     });
     worker.on("error", (error: Error) => {
-      this.postStatus(`the engine worker failed: ${error.message}`);
+      if (this.worker === worker) {
+        this.postStatus(`the engine worker failed: ${error.message}`);
+      }
     });
     worker.on("exit", (code: number) => {
       if (this.worker === worker && code !== 0) {

@@ -143,3 +143,5 @@ vite.config.ts.timestamp-*
 .vite/
 *.vsix
 .dump/
+# DeepSeek diagnostics (failed-request dumps; local only)
+.smartercode/

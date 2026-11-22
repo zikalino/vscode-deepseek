@@ -34,7 +34,7 @@ export const SECRET_KEY = 'deepseek.apiKey';
 /** Settings namespace */
 export const SETTINGS_NS = 'deepseek';
 
-/** Settings namespace for Copilot-specific diagnostics (debugMode, dumpRequests, historyLogging) */
+/** Settings namespace for Copilot-specific diagnostics (debugMode, dumpRequests) */
 export const COPILOT_SETTINGS_NS = 'deepseek-copilot';
 
 /** Maximum allowed tool functions per request (DeepSeek API limit) */

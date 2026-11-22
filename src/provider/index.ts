@@ -28,7 +28,6 @@ import { ReplayEngine } from './replay/engine';
 import { ToolStabilizer, enforceToolLimit } from './tools/flow';
 import { VisionProxy } from './vision/proxy';
 import { getDebugMode } from './schema';
-import { writeHistoryEntry } from '../deepseekLogBrowser';
 
 const REASONING_STORAGE_KEY = 'deepseek.reasoningHistory';
 
@@ -525,8 +524,6 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
             this.pruneReasoningCache();
             this.persistReasoningCache(this.context);
           }
-          // Log Copilot request to history
-          this.logCopilotHistory(request, fullResponseContent, lastUsage);
         },
         onUsage: (usage: DeepSeekUsage) => {
           lastUsage = usage;
@@ -562,74 +559,6 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
       const observed = totalRequestChars / totalTokens;
       // Exponential moving average
       this.charsPerToken = this.charsPerToken * (1 - EMA_ALPHA) + observed * EMA_ALPHA;
-    }
-  }
-
-  /** Log Copilot requests to the history directory. */
-  private logCopilotHistory(
-    request: DeepSeekRequest,
-    responseContent: string,
-    usage?: DeepSeekUsage,
-  ): void {
-    const ts = new Date();
-    const pad = (n: number, w = 2) => String(n).padStart(w, '0');
-    const timestamp = `${ts.getFullYear()}${pad(ts.getMonth()+1)}${pad(ts.getDate())}-${pad(ts.getHours())}${pad(ts.getMinutes())}${pad(ts.getSeconds())}`;
-    const model = request.model;
-    const reqBody = JSON.stringify(request);
-    const pt = usage?.prompt_tokens ?? 0;
-    const ct = usage?.completion_tokens ?? 0;
-    const ch = usage?.prompt_cache_hit_tokens ?? 0;
-    const cm = usage?.prompt_cache_miss_tokens ?? 0;
-    const pricing: Record<string, { input: number; inputCacheHit: number; output: number }> = {
-      'deepseek-v4-flash': { input: 0.14, inputCacheHit: 0.0028, output: 0.28 },
-      'deepseek-v4-pro':   { input: 0.435, inputCacheHit: 0.003625, output: 0.87 },
-      'deepseek-chat':     { input: 0.14, inputCacheHit: 0.0028, output: 0.28 },
-      'deepseek-reasoner': { input: 0.14, inputCacheHit: 0.0028, output: 0.28 },
-    };
-    const pr = pricing[model] || { input: 0.435, inputCacheHit: 0.003625, output: 0.87 };
-    const firstUserMsg = request.messages?.find(m => m.role === 'user');
-    const requestSummary = typeof firstUserMsg?.content === 'string'
-      ? firstUserMsg.content.slice(0, 500)
-      : '';
-    // Reconstruct a full JSON response from the streaming data
-    const responseJson: Record<string, unknown> = {
-      choices: [{
-        message: {
-          content: responseContent,
-        },
-        finish_reason: 'stop',
-      }],
-    };
-    if (usage) {
-      responseJson.usage = {
-        prompt_tokens: usage.prompt_tokens,
-        completion_tokens: usage.completion_tokens,
-        prompt_cache_hit_tokens: ch,
-        prompt_cache_miss_tokens: cm,
-      };
-    }
-    const responseBodyJson = JSON.stringify(responseJson, null, 2);
-    try {
-      writeHistoryEntry({
-        timestamp,
-        model,
-        source: 'copilot',
-        requestSummary,
-        requestBody: reqBody,
-        responseBody: responseBodyJson,
-        requestSizeBytes: Buffer.byteLength(reqBody, 'utf8'),
-        responseSizeBytes: Buffer.byteLength(responseBodyJson, 'utf8'),
-        totalTokens: pt + ct,
-        promptTokens: pt,
-        completionTokens: ct,
-        cacheHitTokens: ch,
-        cacheMissTokens: cm,
-        costUsd: (cm / 1_000_000) * pr.input + (ch / 1_000_000) * pr.inputCacheHit + (ct / 1_000_000) * pr.output,
-        hadError: false,
-        correlationId: timestamp,
-      });
-    } catch {
-      // silently fail
     }
   }
 

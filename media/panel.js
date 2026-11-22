@@ -323,6 +323,13 @@
       case "status":
         status.textContent = message.message ?? "";
         return;
+      case "clear":
+        // A new engine is replacing this conversation; do not leave the old frame under the new
+        // one while it starts (or if it fails to).
+        scene = null;
+        syncSpinner();
+        resize();
+        return;
       case "refreshTheme":
         sendTheme(true);
         return;

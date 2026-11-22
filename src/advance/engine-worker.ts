@@ -47,8 +47,8 @@ function emitLogs(scene: string): void {
   }
 }
 
-let width = 800;
-let height = 600;
+let width = Math.max(1, Math.floor(options.width ?? 800));
+let height = Math.max(1, Math.floor(options.height ?? 600));
 /** The last display list posted, so an unchanged frame is not re-sent. */
 let lastScene = "";
 let guest: Guest | undefined;
@@ -138,9 +138,9 @@ function start(): void {
         pricing: options.pricing,
       },
     });
-    // The panel is multi-surface: the module draws its own top bar (Agent, Tasks, Tools and
-    // Workflows) and settings stays on the chat's gear. The host adds no navigation of its own, so
-    // the component has to keep its bar on and start on the conversation.
+    // The panel is multi-surface: the module draws its own top bar (Agent, Tasks, Tools, Workflows
+    // and Settings). The host adds no navigation of its own, so the component has to keep its bar on
+    // and start on the conversation.
     guest.input({ op: "bar", value: true });
     guest.input({ op: "selectSurface", value: "chat" });
     // The harness cannot list `.advance/workflows`; discovery is the host's.

@@ -21,6 +21,13 @@ export interface EngineOptions {
   pricing: { inputPerMillion: number; cachedPerMillion: number; outputPerMillion: number };
   /** The VS Code theme the webview computed, applied before the first frame when known. */
   theme?: Record<string, unknown>;
+  /**
+   * The panel's last known logical size. A fresh engine is created without a resize event (the
+   * canvas has not moved), so without this its first frame would be 800x600 and paint over only
+   * part of the stale scene.
+   */
+  width?: number;
+  height?: number;
 }
 
 /** Messages the extension host sends to the worker. */

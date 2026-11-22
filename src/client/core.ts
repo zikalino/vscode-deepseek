@@ -7,6 +7,7 @@ import {
 } from '../types';
 import { Logger } from '../logger';
 import { httpError, networkError, unknownError, type DeepSeekErrorResult } from './error';
+import { writeFailureDump } from '../deepseekFailures';
 
 /**
  * Cap on accumulated text content (content + reasoning_content) in characters.
@@ -45,8 +46,10 @@ export class DeepSeekClient {
   ): Promise<void> {
     const url = `${this.baseUrl}/chat/completions`;
     const wireRequest = this.toWireRequest(request);
+    const requestBody = JSON.stringify(wireRequest);
     this.log.info(`DeepSeek request POST ${url}\n${this.formatWirePayload(wireRequest, false)}`);
 
+    let failureDumped = false;
     try {
       const response = await fetch(url, {
         method: 'POST',
@@ -54,7 +57,7 @@ export class DeepSeekClient {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify(wireRequest),
+        body: requestBody,
         signal,
       });
 
@@ -70,12 +73,34 @@ export class DeepSeekClient {
           `responseBody=${bodyText || '<empty>'}`,
         );
         const err = httpError(response.status, bodyText);
+        writeFailureDump({
+          source: 'copilot',
+          model: request.model,
+          url,
+          status: response.status,
+          statusText: response.statusText,
+          error: err.userMessage,
+          requestBody,
+          responseBody: bodyText,
+        });
+        failureDumped = true;
         callbacks.onError(new Error(err.userMessage));
         return;
       }
 
       const reader = response.body?.getReader();
       if (!reader) {
+        writeFailureDump({
+          source: 'copilot',
+          model: request.model,
+          url,
+          status: response.status,
+          statusText: response.statusText,
+          error: 'Response body has no readable stream.',
+          requestBody,
+          responseBody: '',
+        });
+        failureDumped = true;
         callbacks.onError(new Error('Response body has no readable stream.'));
         return;
       }
@@ -168,6 +193,16 @@ export class DeepSeekClient {
       const result: DeepSeekErrorResult = err instanceof Error && 'code' in err
         ? networkError(err as Error & { code?: string })
         : unknownError(err);
+      if (!failureDumped) {
+        writeFailureDump({
+          source: 'copilot',
+          model: request.model,
+          url,
+          error: result.userMessage,
+          requestBody,
+          responseBody: '',
+        });
+      }
       callbacks.onError(new Error(result.userMessage));
     }
   }
