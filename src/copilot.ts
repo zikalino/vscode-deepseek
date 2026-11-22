@@ -11,49 +11,11 @@ function formatError(error: unknown): string {
   return String(error || 'unknown');
 }
 
-function registerChatParticipant(context: vscode.ExtensionContext, log: vscode.OutputChannel): void {
-  if (!vscode.chat || typeof vscode.chat.createChatParticipant !== 'function') {
-    log.appendLine('DeepSeek diagnostics: Chat participant API unavailable in this VS Code build.');
-    return;
-  }
-
-  try {
-    const participant = vscode.chat.createChatParticipant('smartercode.deepseekParticipant', async (request, _chatContext, stream, _token) => {
-      const prompt = String(request?.prompt || '').trim();
-      log.appendLine(
-        `DeepSeek chat participant request: prompt="${prompt}" command="${String(request?.command || '')}" references=${request?.references?.length || 0}`
-      );
-
-      if (!prompt || prompt.toLowerCase() === 'open' || prompt.toLowerCase() === 'view') {
-        await vscode.commands.executeCommand('workbench.action.chat.open');
-        stream.markdown('Opened the VS Code chat panel.');
-        return;
-      }
-
-      stream.markdown([
-        'DeepSeek chat participant is active.',
-        '',
-        'For full DeepSeek features (context tags, note writeback, and diagnostics), run `DeepSeek: Open Chat`.',
-        'I also logged this request to the `DeepSeek` output channel.'
-      ].join('\n'));
-    });
-
-    participant.iconPath = new vscode.ThemeIcon('comment-discussion');
-    context.subscriptions.push(participant);
-    log.appendLine('DeepSeek diagnostics: chat participant registered as @deepseek (id: smartercode.deepseekParticipant).');
-  } catch (err) {
-    log.appendLine(`DeepSeek diagnostics: failed to register chat participant: ${formatError(err)}`);
-  }
-}
-
 /**
- * Register DeepSeek Copilot features:
- * - Chat participant (@deepseek in VS Code Chat)
- * - LanguageModelChatProvider for Copilot integration
+ * Register DeepSeek Copilot features through the LanguageModelChatProvider API
+ * so the DeepSeek models appear in the chat model picker.
  */
 export function registerCopilotFeatures(context: vscode.ExtensionContext, log: vscode.OutputChannel): void {
-  registerChatParticipant(context, log);
-
   // ─── Register DeepSeek as a Copilot LanguageModelChatProvider ──────
   if (!vscode.lm || typeof (vscode.lm as any).registerLanguageModelChatProvider !== 'function') {
     log.appendLine(

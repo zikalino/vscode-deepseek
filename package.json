@@ -36,7 +36,6 @@
   "activationEvents": [
     "onStartupFinished",
     "onLanguageModelChatProvider:deepseek",
-    "onChatParticipant:smartercode.deepseekParticipant",
     "onCommand:deepseek.showLogs",
     "onCommand:deepseek.configureDeepSeek",
     "onCommand:deepseek.createVault",
@@ -103,15 +102,6 @@
         }
       ]
     },
-    "chatParticipants": [
-      {
-        "id": "smartercode.deepseekParticipant",
-        "name": "deepseek",
-        "fullName": "SmarterCode DeepSeek",
-        "description": "Routes prompts to DeepSeek extension diagnostics and opens the DeepSeek chat panel.",
-        "isSticky": true
-      }
-    ],
     "commands": [
       {
         "command": "deepseek.setApiKey",
