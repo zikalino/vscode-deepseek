@@ -1,6 +1,6 @@
 {
   "name": "vscode-deepseek-obsidian",
-  "version": "0.0.47",
+  "version": "0.0.48",
   "description": "DeepSeek-powered coding assistant for VS Code with persistent vault-based project memory, Copilot integration, multi-step iteration flows, and autonomous diff writeback.",
   "license": "ISC",
   "author": "",
@@ -60,6 +60,10 @@
     "onCommand:deepseek.addWorkspaceFilesToPrompt",
     "onCommand:deepseek.addMemoryFilesToPrompt",
     "onCommand:deepseek.addTabToPrompt",
+    "onCommand:deepseek.advance.newChat",
+    "onCommand:deepseek.advance.abort",
+    "onCommand:deepseek.advance.setApiKey",
+    "onCommand:deepseek.advance.openSettings",
     "onCommand:deepseek.showVaultGraph"
   ],
   "contributes": {
@@ -75,6 +79,11 @@
           "id": "deepseek-explorer",
           "title": "DeepSeek",
           "icon": "imgs/logo-48.png"
+        },
+        {
+          "id": "deepseek-advance",
+          "title": "Advance",
+          "icon": "media/advance.svg"
         }
       ]
     },
@@ -84,6 +93,13 @@
           "id": "deepseek.sidebarView",
           "name": "Vault Explorer",
           "icon": "imgs/logo-48.png"
+        }
+      ],
+      "deepseek-advance": [
+        {
+          "id": "deepseek.advanceView",
+          "name": "Advance",
+          "type": "webview"
         }
       ]
     },
@@ -228,6 +244,29 @@
         "command": "deepseek.openVaultFileRaw",
         "title": "View Raw",
         "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.advance.newChat",
+        "title": "New Advance Chat",
+        "category": "DeepSeek",
+        "icon": "$(add)"
+      },
+      {
+        "command": "deepseek.advance.abort",
+        "title": "Stop the Advance Turn",
+        "category": "DeepSeek",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "deepseek.advance.setApiKey",
+        "title": "Set Advance API Key",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.advance.openSettings",
+        "title": "Configure Advance",
+        "category": "DeepSeek",
+        "icon": "$(gear)"
       }
     ],
     "configuration": {
@@ -323,6 +362,46 @@
           "type": "boolean",
           "default": false,
           "description": "Persist a JSON entry to `.smartercode/deepseek-history/` in the workspace for every DeepSeek response. Off by default because it writes to disk on every turn. The newest 200 entries are kept and request/response bodies are truncated to 200,000 characters."
+        },
+        "deepseek.advance.harnessWasm": {
+          "type": "string",
+          "default": "",
+          "description": "Path to advance_harness.wasm. Empty uses the copy bundled with the extension, then a workspace target/wasm32-unknown-unknown/{release,debug} build."
+        },
+        "deepseek.advance.allowWrite": {
+          "type": "boolean",
+          "default": true,
+          "description": "Let the Advance agent create, edit, move and delete files in the first workspace folder."
+        },
+        "deepseek.advance.allowedCommands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Programs the Advance agent may run. Empty removes the shell tool entirely."
+        },
+        "deepseek.advance.commandTimeoutSeconds": {
+          "type": "number",
+          "default": 120,
+          "minimum": 1,
+          "maximum": 3600,
+          "description": "How long an Advance command may run before it is killed."
+        },
+        "deepseek.advance.pricing.inputPerMillion": {
+          "type": "number",
+          "default": 0,
+          "description": "Dollars per million uncached input tokens, for the Advance panel's cost divider. Zero hides the figures."
+        },
+        "deepseek.advance.pricing.cachedPerMillion": {
+          "type": "number",
+          "default": 0,
+          "description": "Dollars per million cache-hit input tokens."
+        },
+        "deepseek.advance.pricing.outputPerMillion": {
+          "type": "number",
+          "default": 0,
+          "description": "Dollars per million output tokens."
         }
       }
     },
@@ -473,6 +552,21 @@
           "command": "deepseek.advancedSearch",
           "when": "view == deepseek.sidebarView",
           "group": "navigation@2"
+        },
+        {
+          "command": "deepseek.advance.newChat",
+          "when": "view == deepseek.advanceView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "deepseek.advance.openSettings",
+          "when": "view == deepseek.advanceView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "deepseek.advance.setApiKey",
+          "when": "view == deepseek.advanceView",
+          "group": "navigation@3"
         }
       ],
       "commandPalette": [
@@ -535,6 +629,18 @@
         },
         {
           "command": "deepseek.advancedSearch"
+        },
+        {
+          "command": "deepseek.advance.newChat"
+        },
+        {
+          "command": "deepseek.advance.abort"
+        },
+        {
+          "command": "deepseek.advance.setApiKey"
+        },
+        {
+          "command": "deepseek.advance.openSettings"
         }
       ]
     }

@@ -1,5 +1,5 @@
 # SmarterCode DeepSeek
-**Version: 0.0.47**
+**Version: 0.0.48**
 
 > **⚠️ IMPORTANT NOTE — Production & Preview Features**
 >
@@ -48,6 +48,7 @@
 - **Persistent project memory (Vault)** — An embedded vault of Markdown notes with tags and frontmatter that forms an evolving knowledge base for your project.
 - **Tag-based context selection** — Tags let you control which vault notes are included in prompts.
 - **Diff-based writeback** — DeepSeek can propose file changes as unified diffs, and the extension applies them automatically.
+- **Advance panel (WASM)** — A self-contained agent panel — conversation, tasks, tools and workflows — with its agent loop shipped as `advance_harness.wasm`, and an Activity Bar icon of its own.
 
 ---
 
@@ -187,6 +188,33 @@ Each log entry shows:
 This is useful for tracking usage and ensuring you're not exceeding API budget. You can adjust the model selection and context size (via `deepseek.maxContextNotes` and `deepseek.maxNoteLength`) to control costs.
 
 For deeper diagnostics, set `deepseek-copilot.debugMode` to `"verbose"`. To also capture the raw Copilot and DeepSeek payloads in the workspace `.dump/` folder, enable `deepseek-copilot.dumpRequests` — it writes several megabytes per turn, so it is off by default, and retention keeps roughly the newest 100 files of each kind.
+
+---
+
+### Advance Panel (WASM harness)
+
+The **Advance** icon in the Activity Bar opens a panel whose interface and agent loop are the
+bundled `advance_harness.wasm` module. The extension supplies the capabilities: the model endpoint and
+key, file access confined to the first workspace folder, and an allowlisted command runner.
+
+1. Click the **Advance** icon in the Activity Bar.
+2. Run **DeepSeek: Set Advance API Key** once. The key is stored in VS Code secret storage;
+   `DEEPSEEK_API_KEY` works as a fallback.
+3. Ask for a change. The panel reuses `deepseek.apiEndpoint` and `deepseek.model`.
+
+The module runs on a worker thread, so a long build it starts cannot freeze the editor. File writes
+and command execution are governed by `deepseek.advance.allowWrite` and
+`deepseek.advance.allowedCommands`; the allowlist is empty by default, which removes the shell tool
+entirely. Toolbar buttons start a new chat, open settings, and set the key.
+
+The panel is multi-surface. The bar along its top switches between **Agent** (the conversation),
+**Tasks**, **Tools** (the calls the agent may make under the current grant) and **Workflows**; the
+gear opens the provider settings. Workflows are the documents in `.advance/workflows/*.md`, and
+pressing a card opens its document in the editor.
+
+The bundled host and module come from the MIT-licensed
+[Advance project](https://github.com/zikalino/advance); see
+`THIRD-PARTY-NOTICES/advance-MIT-license.txt` for the notice.
 
 ---
 
@@ -392,6 +420,16 @@ All settings are under the `deepseek.*` and `deepseek-copilot.*` namespaces.
 | `deepseek-copilot.dumpRequests` | boolean | `false` | Also write raw Copilot/DeepSeek request and response payloads to the workspace `.dump/` folder (several MB per turn; retention keeps roughly the newest 100 files of each kind). |
 | `deepseek-copilot.historyLogging` | boolean | `false` | Persist a JSON entry per DeepSeek response to `.smartercode/deepseek-history/` (newest 200 entries kept; bodies truncated to 200,000 chars). |
 
+### Advance Panel Settings (`deepseek.advance.*`)
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `deepseek.advance.harnessWasm` | string | `""` | Path to `advance_harness.wasm`. Empty uses the bundled copy, then a workspace `target/wasm32-unknown-unknown/{release,debug}` build. |
+| `deepseek.advance.allowWrite` | boolean | `true` | Let the Advance agent create, edit, move and delete files in the first workspace folder. |
+| `deepseek.advance.allowedCommands` | string[] | `[]` | Programs the shell tool may run. Empty removes the shell tool entirely. |
+| `deepseek.advance.commandTimeoutSeconds` | number (1–3600) | `120` | How long an Advance command may run before it is killed. |
+| `deepseek.advance.pricing.*` | number | `0` | Dollars per million tokens for the panel's cost divider (zero hides the figures). |
+
 ### Internal Copilot Settings (advanced)
 
 | Setting | Namespace | Description |
@@ -415,6 +453,10 @@ Commands marked with 🔍 are accessible from the **F1 command palette**. Intern
 | 🔍 `deepseek.showLogs` | DeepSeek: Browse Logs | Open the DeepSeek output log channel. |
 | 🔍 `deepseek.configureDeepSeek` | DeepSeek: Configure Settings | Open VS Code settings for this extension. |
 | 🔍 `deepseek.createVault` | DeepSeek: Create Vault | Initialize a new vault in the workspace. |
+| 🔍 `deepseek.advance.newChat` | DeepSeek: New Advance Chat | Start a fresh conversation in the Advance panel. |
+| 🔍 `deepseek.advance.abort` | DeepSeek: Stop the Advance Turn | Cancel the current Advance turn. |
+| 🔍 `deepseek.advance.setApiKey` | DeepSeek: Set Advance API Key | Store or clear the API key used by the Advance panel. |
+| 🔍 `deepseek.advance.openSettings` | DeepSeek: Configure Advance | Open the Advance settings. |
 
 ### Internal Commands (hidden from F1 palette)
 
@@ -513,10 +555,10 @@ npm run compile
 
 ### Package & Install
 
-Run `build-install.bat` from the extension folder:
+Run `buin.bat` from the extension folder:
 
 ```bash
-build-install.bat
+buin.bat
 ```
 
 This runs `vsce package` (which triggers `vscode:prepublish` → `precompile` → `compile`), then `code --install-extension` on the resulting `.vsix`.
@@ -537,6 +579,7 @@ vscode-deepseek/
 │   ├── types.ts               # TypeScript types
 │   ├── logger.ts              # Output channel logger
 │   ├── i18n.ts                # Internationalization (Chinese/English)
+│   ├── advance/               # WASM harness host + Advance panel provider
 │   ├── deepseekClient.ts      # Standalone DeepSeek API client
 │   ├── vaultManager.ts        # Vault file management & frontmatter parsing
 │   ├── indexEngine.ts         # Tag/id/type index building

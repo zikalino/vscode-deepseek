@@ -1,0 +1,36 @@
+// The messages exchanged between the extension host and the engine worker.
+//
+// Kept in its own module so both sides can import the types without pulling in the worker's
+// top-level code (importing `engine-worker` outside a worker thread throws by design).
+
+/** Everything the worker needs, handed over as `workerData`. */
+export interface EngineOptions {
+  /** The harness artifact to instantiate. */
+  wasmPath: string;
+  /** The folder `/workspace` maps to. */
+  workspace: string;
+  /** The full chat-completions URL. */
+  apiUrl: string;
+  /** The provider token (in-process only; never sent to the webview). */
+  apiKey: string;
+  model: string;
+  allowWrite: boolean;
+  allowedCommands: string[];
+  commandTimeoutMs: number;
+  /** Dollars per million tokens, handed to the harness for its cost divider. */
+  pricing: { inputPerMillion: number; cachedPerMillion: number; outputPerMillion: number };
+}
+
+/** Messages the extension host sends to the worker. */
+export type EngineRequest =
+  | { type: "input"; event: Record<string, unknown> }
+  | { type: "resize"; width: number; height: number }
+  | { type: "stop" };
+
+/** Messages the worker sends back. */
+export type EngineResponse =
+  | { type: "scene"; scene: string }
+  | { type: "status"; message: string }
+  | { type: "ready" }
+  | { type: "openWorkflow"; path: string }
+  | { type: "error"; message: string };

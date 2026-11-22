@@ -11,6 +11,7 @@ import {
 } from '../vendor/vscode-components/dist/objective-workflow';
 // objectiveWorkflow removed — all iteration flow now uses createPrompt (Prompt Webview)
 import { registerCopilotFeatures } from './copilot';
+import { registerAdvancePanel } from './advance/panel';
 import { SETTINGS_NS } from './consts';
 import { PromptWebviewHandle } from '../vendor/vscode-components/dist/prompt';
 import { sendMessageToAgent } from './agentInteractions';
@@ -35,6 +36,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   const { log, effectiveVaultRoot } = commonActivate(context, 'DeepSeek', 'deepseek', 'DeepSeek', 'vaultPath', () => activePromptWebview);
   registerCopilotFeatures(context, log);
+  registerAdvancePanel(context);
 
   const cfg = vscode.workspace.getConfiguration('deepseek');
   const defaultTags = cfg.get<string[]>('defaultContextTags', []);

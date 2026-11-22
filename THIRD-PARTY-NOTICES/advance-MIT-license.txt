@@ -1,0 +1,37 @@
+Advance — https://github.com/zikalino/advance
+
+The Advance chat panel in this extension is built from the Advance project. The
+following files are copied or compiled from it and are distributed under the MIT
+License below:
+
+  src/advance/                 TypeScript host (ABI, capability router, net pump,
+                               engine worker, panel provider)
+  media/advance_harness.wasm   Compiled harness module (from advance 0.1.1)
+  media/panel.js               Compiled webview canvas/input renderer
+  media/panel.css              Panel stylesheet
+  media/advance.svg            Activity Bar icon
+
+The Advance project declares the MIT License in its package.json. This notice
+reproduces that license for the copied code.
+
+MIT License
+
+Copyright (c) 2026 Zim Kalinowski
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
