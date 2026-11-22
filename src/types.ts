@@ -1,0 +1,173 @@
+import type * as vscode from 'vscode';
+
+// ─── Model definitions ─────────────────────────────────────────
+
+export interface ModelDefinition {
+  id: string;                    // vendor-specific ID (e.g. 'deepseek-v4-flash')
+  apiModel: string;              // API model string (e.g. 'deepseek-v4-flash')
+  name: string;                  // Display name
+  maxInputTokens: number;
+  maxOutputTokens: number;
+  requiresThinkingParam: boolean;
+  supportsToolCalling: boolean;
+  supportsVision: boolean;       // true = proxied via another Copilot model
+  supportsImageInput: boolean;   // true = native vision
+}
+
+// ─── Configuration types ──────────────────────────────────────
+
+export type ThinkingEffort = 'none' | 'high' | 'max';
+export type TemperaturePreset = 'balanced' | 'precise' | 'creative' | 'max';
+export type DebugMode = 'minimal' | 'metadata' | 'verbose';
+
+export interface ModelConfiguration {
+  reasoningEffort?: ThinkingEffort;
+  temperature?: TemperaturePreset;
+}
+
+export const TEMPERATURE_VALUES: Record<TemperaturePreset, number> = {
+  balanced: 1.0,
+  precise: 0.2,
+  creative: 1.3,
+  max: 1.5,
+};
+
+// ─── DeepSeek API types ───────────────────────────────────────
+
+export interface DeepSeekMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string;
+  /** Injected from cache on multi-turn reasoning */
+  reasoning_content?: string;
+  tool_calls?: DeepSeekToolCall[];
+  tool_call_id?: string;
+  name?: string;
+}
+
+export interface DeepSeekToolCall {
+  id: string;
+  type: 'function';
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
+export interface DeepSeekTool {
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
+export interface DeepSeekRequest {
+  model: string;
+  messages: DeepSeekMessage[];
+  stream: true;
+  thinking?: { type: 'enabled' | 'disabled' };
+  reasoning_effort?: 'low' | 'high' | 'max';
+  temperature?: number;
+  tools?: DeepSeekTool[];
+  tool_choice?: 'none' | 'auto' | 'required';
+  max_tokens?: number;
+  stream_options: { include_usage: true };
+}
+
+export interface DeepSeekUsage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  prompt_cache_hit_tokens?: number;
+  prompt_cache_miss_tokens?: number;
+}
+
+// ─── Streaming types ──────────────────────────────────────────
+
+export interface DeepSeekStreamChunk {
+  choices?: {
+    delta: {
+      content?: string;
+      reasoning_content?: string;
+      tool_calls?: {
+        index: number;
+        id?: string;
+        type?: 'function';
+        function?: {
+          name?: string;
+          arguments?: string;
+        };
+      }[];
+    };
+    finish_reason?: 'stop' | 'tool_calls' | null;
+  }[];
+  usage?: DeepSeekUsage;
+}
+
+export interface StreamCallbacks {
+  onContent: (text: string) => void;
+  onThinking?: (text: string) => void;
+  onToolCall: (toolCall: DeepSeekToolCall) => void;
+  onSseData?: (line: string) => void;
+  onError: (error: Error) => void;
+  onDone: () => void;
+  onUsage?: (usage: DeepSeekUsage) => void;
+}
+
+// ─── Reasoning persistence ────────────────────────────────────
+
+export interface ReasoningEntry {
+  text: string;
+  timestamp: number;
+}
+
+export interface ReasoningHistoryState {
+  nextReasoningTurnIndex: number;
+  entries: [string, ReasoningEntry][];
+}
+
+// ─── Replay markers ───────────────────────────────────────────
+
+export interface ReplayMarkerPayload {
+  segmentId: string;
+  vision?: { text: string };
+  reasoning?: { text: string };
+}
+
+// ─── Vision proxy stats ───────────────────────────────────────
+
+export interface VisionProxyStats {
+  inputImageParts: number;
+  inputImageMessages: number;
+  currentImageMessages: number;
+  replayedImageMessages: number;
+  omittedHistoricalMessages: number;
+  failedMessages: number;
+  unavailableMessages: number;
+  droppedImageParts: number;
+}
+
+// ─── Request classification ───────────────────────────────────
+
+export type RequestKind =
+  | 'main-agent'
+  | 'terminal-steering'
+  | 'todo-tracker'
+  | 'settings-resolver'
+  | 'background'
+  | 'unknown';
+
+// ─── Cache diagnostics ────────────────────────────────────────
+
+export interface CacheDiagnostics {
+  segmentId: string;
+  segmentSource: 'markerFound' | 'markerMissing' | 'markerInvalid';
+  messageCountByRole: Record<string, number>;
+  toolCallArgChars: number;
+  reasoningContentChars: number;
+  messageContentSections: Record<string, number>;
+  toolSchemaHashes: string[];
+  prefixOverlapRatio?: number;
+  visionStats?: VisionProxyStats;
+  replayMarkerReported: boolean;
+}

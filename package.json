@@ -1,0 +1,542 @@
+{
+  "name": "vscode-deepseek-obsidian",
+  "version": "0.0.47",
+  "description": "DeepSeek-powered coding assistant for VS Code with persistent vault-based project memory, Copilot integration, multi-step iteration flows, and autonomous diff writeback.",
+  "license": "ISC",
+  "author": "",
+  "icon": "imgs/logo.png",
+  "type": "commonjs",
+  "main": "./out/extension.js",
+  "scripts": {
+    "prepare:shared-components": "node ./scripts/materialize-shared-components.js",
+    "precompile": "npm run prepare:shared-components",
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "lint": "echo \"No lint configured\""
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "displayName": "SmarterCode DeepSeek",
+  "publisher": "Zim",
+  "categories": [
+    "Other",
+    "Machine Learning"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onLanguageModelChatProvider:deepseek",
+    "onChatParticipant:smartercode.deepseekParticipant",
+    "onCommand:deepseek.showLogs",
+    "onCommand:deepseek.configureDeepSeek",
+    "onCommand:deepseek.createVault",
+    "onCommand:deepseek.openSavedWorkflow",
+    "onCommand:deepseek.openVaultFile",
+    "onCommand:deepseek.openTodoItem",
+    "onCommand:deepseek.sidebar.refresh",
+    "onCommand:deepseek.sidebar.filter",
+    "onCommand:deepseek.sidebar.clearFilter",
+    "onCommand:deepseek.advancedSearch",
+    "onCommand:deepseek.explorerDeleteItem",
+    "onCommand:deepseek.explorerShowMenu",
+    "onCommand:deepseek.showTaggedFiles",
+    "onCommand:deepseek.api.submitToDeepSeek",
+    "onCommand:deepseek.api.addRequestText",
+    "onCommand:deepseek.createPrompt",
+    "onCommand:deepseek.createPromptWithOpenTabs",
+    "onCommand:deepseek.addToPrompt",
+    "onCommand:deepseek.sendPromptToDeepSeek",
+    "onCommand:deepseek.addTagsToPrompt",
+    "onCommand:deepseek.addWorkspaceFilesToPrompt",
+    "onCommand:deepseek.addMemoryFilesToPrompt",
+    "onCommand:deepseek.addTabToPrompt",
+    "onCommand:deepseek.showVaultGraph"
+  ],
+  "contributes": {
+    "languageModelChatProviders": [
+      {
+        "vendor": "deepseek",
+        "displayName": "DeepSeek"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "deepseek-explorer",
+          "title": "DeepSeek",
+          "icon": "imgs/logo-48.png"
+        }
+      ]
+    },
+    "views": {
+      "deepseek-explorer": [
+        {
+          "id": "deepseek.sidebarView",
+          "name": "Vault Explorer",
+          "icon": "imgs/logo-48.png"
+        }
+      ]
+    },
+    "chatParticipants": [
+      {
+        "id": "smartercode.deepseekParticipant",
+        "name": "deepseek",
+        "fullName": "SmarterCode DeepSeek",
+        "description": "Routes prompts to DeepSeek extension diagnostics and opens the DeepSeek chat panel.",
+        "isSticky": true
+      }
+    ],
+    "commands": [
+      {
+        "command": "deepseek.setApiKey",
+        "title": "DeepSeek: Set API Key"
+      },
+      {
+        "command": "deepseek.clearApiKey",
+        "title": "DeepSeek: Clear API Key"
+      },
+      {
+        "command": "deepseek.configureDeepSeek",
+        "title": "DeepSeek: Configure Settings"
+      },
+      {
+        "command": "deepseek.showLogs",
+        "title": "DeepSeek: Browse Logs"
+      },
+      {
+        "command": "deepseek.createVault",
+        "title": "DeepSeek: Create Vault"
+      },
+      {
+        "command": "deepseek.openSavedWorkflow",
+        "title": "Open Saved Prompt",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.openVaultFile",
+        "title": "DeepSeek: Open Vault File"
+      },
+      {
+        "command": "deepseek.openTodoItem",
+        "title": "DeepSeek: Open Todo File at Line"
+      },
+      {
+        "command": "deepseek.sidebar.refresh",
+        "title": "DeepSeek: Refresh Sidebar Explorer",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "deepseek.sidebar.filter",
+        "title": "DeepSeek: Filter Vault Explorer",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "deepseek.sidebar.clearFilter",
+        "title": "DeepSeek: Clear Vault Explorer Filter"
+      },
+      {
+        "command": "deepseek.advancedSearch",
+        "title": "DeepSeek: Vault Search",
+        "icon": "$(search)"
+      },
+      {
+        "command": "deepseek.showVaultGraph",
+        "title": "DeepSeek: Vault Graph",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "deepseek.explorerDeleteItem",
+        "title": "Delete",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.explorerShowMenu",
+        "title": "More Actions",
+        "category": "DeepSeek",
+        "icon": "$(ellipsis)"
+      },
+      {
+        "command": "deepseek.showTaggedFiles",
+        "title": "Show Tagged Files",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.api.submitToDeepSeek",
+        "title": "Submit Context to DeepSeek",
+        "category": "DeepSeek API"
+      },
+      {
+        "command": "deepseek.api.addRequestText",
+        "title": "Add Request Text to Chat Draft",
+        "category": "DeepSeek API"
+      },
+      {
+        "command": "deepseek.createPrompt",
+        "title": "Iterative Prompt",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.createPromptWithOpenTabs",
+        "title": "Iterative Prompt with Open Tabs",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.addToPrompt",
+        "title": "Add to Iterative Prompt",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.sendPromptToDeepSeek",
+        "title": "Send Prompt To DeepSeek",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.addTagsToPrompt",
+        "title": "Add Tags to Prompt",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.addWorkspaceFilesToPrompt",
+        "title": "Add Workspace Files to Prompt",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.addMemoryFilesToPrompt",
+        "title": "Add Memory Files to Prompt",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.addTabToPrompt",
+        "title": "Add Tabs to Iterative Prompt",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.createNewProject",
+        "title": "DeepSeek: Create a New Project"
+      },
+      {
+        "command": "deepseek.openVaultFileRaw",
+        "title": "View Raw",
+        "category": "DeepSeek"
+      }
+    ],
+    "configuration": {
+      "title": "SmarterCode DeepSeek",
+      "properties": {
+        "deepseek.mode": {
+          "type": "string",
+          "enum": [
+            "api",
+            "local"
+          ],
+          "default": "api",
+          "description": "Mode for DeepSeek: 'api' for cloud API, 'local' for local inference."
+        },
+        "deepseek.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "DeepSeek API key (required in API mode). Prefer the DEEPSEEK_API_KEY environment variable."
+        },
+        "deepseek.apiEndpoint": {
+          "type": "string",
+          "default": "https://api.deepseek.com/chat/completions",
+          "description": "DeepSeek API endpoint override."
+        },
+        "deepseek.model": {
+          "type": "string",
+          "default": "deepseek-v4-flash",
+          "description": "DeepSeek model name (e.g. deepseek-v4-pro, deepseek-v4-flash)."
+        },
+        "deepseek.maxContextNotes": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 50,
+          "description": "Maximum number of vault notes injected per chat turn."
+        },
+        "deepseek.maxNoteLength": {
+          "type": "number",
+          "default": 4000,
+          "minimum": 100,
+          "maximum": 32000,
+          "description": "Maximum character length per vault note before truncation."
+        },
+        "deepseek.systemPromptPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional path to a system prompt file inside the vault (relative to vault root)."
+        },
+        "deepseek.vaultRoot": {
+          "type": "string",
+          "default": ".vault",
+          "description": "Vault root path relative to workspace root. The .vault suffix is appended automatically."
+        },
+        "deepseek.vaultPath": {
+          "type": "string",
+          "default": "",
+          "description": "(Legacy) Deprecated alias for deepseek.vaultRoot."
+        },
+        "deepseek.globalVaultPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional absolute path to an additional global vault outside the workspace. Notes from this vault appear under 'Global Vault Files' in the sidebar. Tags are merged with the workspace vault."
+        },
+        "deepseek.defaultContextTags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Default context tags active on startup (e.g. [\"general\"])."
+        },
+        "deepseek.variableFolders": {
+          "type": "object",
+          "default": {},
+          "description": "Maps variable names (e.g. 'patches') to absolute filesystem paths for resolving ${variable} prefixes in suggestedFile paths from vault notes."
+        },
+        "deepseek-copilot.debugMode": {
+          "type": "string",
+          "enum": [
+            "minimal",
+            "metadata",
+            "verbose"
+          ],
+          "default": "minimal",
+          "description": "Controls Copilot request diagnostics. Minimal hides request dumps, metadata logs request summaries, and verbose writes request dump files under global storage."
+        },
+        "deepseek-copilot.dumpRequests": {
+          "type": "boolean",
+          "default": false,
+          "description": "Write raw Copilot/DeepSeek request and response payloads to the workspace `.dump/` folder. Every turn writes several megabytes, so leave this off unless you are debugging message conversion. Retention keeps roughly the newest 100 files of each kind."
+        },
+        "deepseek-copilot.historyLogging": {
+          "type": "boolean",
+          "default": false,
+          "description": "Persist a JSON entry to `.smartercode/deepseek-history/` in the workspace for every DeepSeek response. Off by default because it writes to disk on every turn. The newest 200 entries are kept and request/response bodies are truncated to 200,000 characters."
+        }
+      }
+    },
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "deepseek.addToPrompt",
+          "when": "explorerViewletVisible && resourceScheme === file",
+          "group": "deepseek@1"
+        },
+        {
+          "command": "deepseek.addToPrompt",
+          "when": "explorerViewletVisible && explorerResourceIsFolder",
+          "group": "deepseek@1"
+        },
+        {
+          "command": "deepseek.addTabToPrompt",
+          "when": "explorerViewletVisible && resourceScheme === file",
+          "group": "deepseek@2"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "deepseek.addToPrompt",
+          "when": "editorHasSelection",
+          "group": "deepseek@1"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "deepseek.addTabToPrompt",
+          "when": "resourceScheme == file",
+          "group": "deepseek@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "deepseek.openVaultFile",
+          "when": "view == deepseek.sidebarView && viewItem == vaultFile",
+          "group": "0@0"
+        },
+        {
+          "command": "deepseek.openVaultFileRaw",
+          "when": "view == deepseek.sidebarView && viewItem == vaultFile",
+          "group": "0@0.1"
+        },
+        {
+          "command": "deepseek.addToPrompt",
+          "when": "view == deepseek.sidebarView && viewItem == vaultFile",
+          "group": "0@1"
+        },
+        {
+          "command": "deepseek.explorerDeleteItem",
+          "when": "view == deepseek.sidebarView && viewItem == vaultFile",
+          "group": "0@2"
+        },
+        {          "command": "deepseek.openVaultFile",
+          "when": "view == deepseek.sidebarView && viewItem == vaultFolder",
+          "group": "0@0"
+        },
+        {
+          "command": "deepseek.openVaultFileRaw",
+          "when": "view == deepseek.sidebarView && viewItem == vaultFolder",
+          "group": "0@0.1"
+        },
+        {          "command": "deepseek.openVaultFile",
+          "when": "view == deepseek.sidebarView && viewItem == vaultFolder",
+          "group": "0@0"
+        },
+        {
+          "command": "deepseek.openVaultFileRaw",
+          "when": "view == deepseek.sidebarView && viewItem == vaultFolder",
+          "group": "0@0.1"
+        },
+        {
+          "command": "deepseek.addToPrompt",
+          "when": "view == deepseek.sidebarView && viewItem == vaultFolder",
+          "group": "0@1"
+        },
+        {
+          "command": "deepseek.openVaultFile",
+          "when": "view == deepseek.sidebarView && viewItem == globalVaultFile",
+          "group": "0@0"
+        },
+        {
+          "command": "deepseek.openVaultFileRaw",
+          "when": "view == deepseek.sidebarView && viewItem == globalVaultFile",
+          "group": "0@0.1"
+        },
+        {
+          "command": "deepseek.addToPrompt",
+          "when": "view == deepseek.sidebarView && viewItem == globalVaultFile",
+          "group": "0@1"
+        },
+        {
+          "command": "deepseek.explorerDeleteItem",
+          "when": "view == deepseek.sidebarView && viewItem == globalVaultFile",
+          "group": "0@2"
+        },
+        {
+          "command": "deepseek.openVaultFile",
+          "when": "view == deepseek.sidebarView && viewItem == globalVaultFolder",
+          "group": "0@0"
+        },
+        {
+          "command": "deepseek.openVaultFileRaw",
+          "when": "view == deepseek.sidebarView && viewItem == globalVaultFolder",
+          "group": "0@0.1"
+        },
+        {
+          "command": "deepseek.addToPrompt",
+          "when": "view == deepseek.sidebarView && viewItem == globalVaultFolder",
+          "group": "0@1"
+        },
+        {
+          "command": "deepseek.addToPrompt",
+          "when": "view == deepseek.sidebarView && viewItem == tagItem",
+          "group": "0@1"
+        },
+        {
+          "command": "deepseek.addToPrompt",
+          "when": "view == deepseek.sidebarView && viewItem == todoItem",
+          "group": "0@1"
+        },
+        {
+          "command": "deepseek.openSavedWorkflow",
+          "when": "view == deepseek.sidebarView && viewItem == savedPromptItem",
+          "group": "0@1"
+        },
+        {
+          "command": "deepseek.explorerDeleteItem",
+          "when": "view == deepseek.sidebarView && viewItem == savedPromptItem",
+          "group": "0@2"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "deepseek.sidebar.refresh",
+          "when": "view == deepseek.sidebarView",
+          "group": "navigation@0"
+        },
+        {
+          "command": "deepseek.sidebar.filter",
+          "when": "view == deepseek.sidebarView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "deepseek.advancedSearch",
+          "when": "view == deepseek.sidebarView",
+          "group": "navigation@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "deepseek.setApiKey"
+        },
+        {
+          "command": "deepseek.clearApiKey"
+        },
+        {
+          "command": "deepseek.sidebar.refresh",
+          "when": "false"
+        },
+        {
+          "command": "deepseek.sidebar.filter",
+          "when": "false"
+        },
+        {
+          "command": "deepseek.sidebar.clearFilter",
+          "when": "false"
+        },
+        {
+          "command": "deepseek.explorerDeleteItem",
+          "when": "false"
+        },
+        {
+          "command": "deepseek.explorerShowMenu",
+          "when": "false"
+        },
+        {
+          "command": "deepseek.showTaggedFiles",
+          "when": "false"
+        },
+        {
+          "command": "deepseek.openVaultFile",
+          "when": "false"
+        },
+        {
+          "command": "deepseek.openSavedWorkflow"
+        },
+        {
+          "command": "deepseek.openTodoItem",
+          "when": "false"
+        },
+        {
+          "command": "deepseek.sendPromptToDeepSeek",
+          "when": "false"
+        },
+        {
+          "command": "deepseek.addToPrompt",
+          "when": "false"
+        },
+        {
+          "command": "deepseek.api.submitToDeepSeek",
+          "when": "false"
+        },
+        {
+          "command": "deepseek.api.addRequestText",
+          "when": "false"
+        },
+        {
+          "command": "deepseek.advancedSearch"
+        }
+      ]
+    }
+  }
+}

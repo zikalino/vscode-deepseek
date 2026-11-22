@@ -1,0 +1,52 @@
+{
+  "name": "@monorepo-life/vscode-components",
+  "private": true,
+  "version": "0.0.1",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./workflow-execution-plan": {
+      "types": "./dist/workflow-execution-plan/index.d.ts",
+      "default": "./dist/workflow-execution-plan/index.js"
+    },
+    "./terminal": {
+      "types": "./dist/terminal/index.d.ts",
+      "default": "./dist/terminal/index.js"
+    },
+    "./opera-workbench": {
+      "types": "./dist/opera-workbench/index.d.ts",
+      "default": "./dist/opera-workbench/index.js"
+    },
+    "./vault-management": {
+      "types": "./dist/vault-management/index.d.ts",
+      "default": "./dist/vault-management/index.js"
+    },
+    "./vault-sidebar": {
+      "types": "./dist/vault-sidebar/index.d.ts",
+      "default": "./dist/vault-sidebar/index.js"
+    },
+    "./vault-graph": {
+      "types": "./dist/vault-graph/index.d.ts",
+      "default": "./dist/vault-graph/index.js"
+    },
+    "./objective-workflow": {
+      "types": "./dist/objective-workflow/index.d.ts",
+      "default": "./dist/objective-workflow/index.js"
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./ && node -e \"require('fs').cpSync('workflow-execution-plan/workflow-execution-plan.html', 'dist/workflow-execution-plan/workflow-execution-plan.html')\"",
+    "postcompile": "node -e \"require('fs').cpSync('workflow-execution-plan/workflow-execution-plan.html', 'dist/workflow-execution-plan/workflow-execution-plan.html'); require('fs').cpSync('markdown-webview/webview.js', 'dist/markdown-webview/webview.js'); require('fs').cpSync('vault-graph/webview.js', 'dist/vault-graph/webview.js'); console.log('postcompile done')\""
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22",
+    "@types/vscode": "^1.100.0",
+    "js-yaml": "^4.1.1",
+    "typescript": "^5.9.2"
+  }
+}

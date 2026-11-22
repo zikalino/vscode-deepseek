@@ -1,0 +1,1 @@
+export { buildIndex, resolveTagsToNotes, TagIndex, IdIndex, TypeIndex, VaultIndex } from '../vendor/vscode-components/dist/objective-workflow/indexEngine';
