@@ -158,6 +158,9 @@ function start(): void {
       writable: options.allowWrite,
       allowedCommands: options.allowedCommands,
       commandTimeoutMs: options.commandTimeoutMs,
+      galleryDir: options.galleryDir,
+      galleryUrl: options.galleryUrl,
+      githubToken: options.githubToken,
     });
     const pumps = new NetPumps(origin(options.apiUrl));
 

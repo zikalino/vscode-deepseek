@@ -41,6 +41,7 @@
     "onCommand:deepseek.advance.showWorkflow",
     "onCommand:deepseek.advance.openWorkflowDocument",
     "onCommand:deepseek.advance.setApiKey",
+    "onCommand:deepseek.advance.setGithubToken",
     "onCommand:deepseek.advance.openSettings"
   ],
   "contributes": {
@@ -117,6 +118,11 @@
         "category": "DeepSeek"
       },
       {
+        "command": "deepseek.advance.setGithubToken",
+        "title": "Set Zero Gallery Token",
+        "category": "DeepSeek"
+      },
+      {
         "command": "deepseek.advance.openSettings",
         "title": "Configure Zero",
         "category": "DeepSeek",
@@ -160,6 +166,11 @@
           "type": "string",
           "default": "",
           "description": "Path to advance_harness.wasm. Empty uses the copy bundled with the extension, then a workspace target/wasm32-unknown-unknown/{release,debug} build."
+        },
+        "deepseek.advance.galleryUrl": {
+          "type": "string",
+          "default": "https://github.com/zikalino/zero-gallery.git",
+          "description": "Git URL of the Zero tool gallery, cloned into global storage. Change it to publish to a fork."
         },
         "deepseek.advance.allowWrite": {
           "type": "boolean",
@@ -240,6 +251,9 @@
         },
         {
           "command": "deepseek.advance.setApiKey"
+        },
+        {
+          "command": "deepseek.advance.setGithubToken"
         },
         {
           "command": "deepseek.advance.openSettings"

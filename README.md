@@ -128,10 +128,12 @@ made of `command`/`write` steps also lets the agent call it as a tool, using the
 its parameters; a workflow with several buttons, or with `agent`/`setting`/`task` steps, stays
 user-run.
 
-A **custom tool** is a document in the extension's global tools folder,
-`<globalStorage>/tools/*.md`, not in the current project. The agent writes one with
-`create_custom_tool`; it has no dialog, but it uses the same markdown-form directives as a workflow:
-`param` declares an argument, a `script` holds the steps, and `output` is what the model receives.
+A **custom tool** is a document in the extension's global tools folder, not in the current project.
+A tool the agent creates is `<globalStorage>/tools/<name>.md`; a tool installed from the gallery is
+`<globalStorage>/tools/<id>/tool.md` (any supporting files sit beside it). The agent writes the flat
+form with `create_custom_tool`; it has no dialog, but it uses the same markdown-form directives as a
+workflow: `param` declares an argument, a `script` holds the steps, and `output` is what the model
+receives.
 
 ```markdown
 ---
@@ -160,6 +162,23 @@ end
 The script accepts `command` and `write` steps. `{{id}}` is an argument; in the output template
 `{{result}}` is everything the steps printed. The tool is listed in **Tools** as soon as it exists,
 but it is never sent to the model until its checkbox is ticked.
+
+The **Zero gallery** is a public repository of tools, cloned automatically into
+`<globalStorage>/zero-gallery` and refreshed when the panel starts (at most every ten minutes). Its
+layout is one folder per tool, `tools/<tool-id>/tool.md`, plus any files the tool needs. Three
+built-in tools use it:
+
+- `gallery_search` lists tools by id, title and description, and says which are already installed.
+- `gallery_tool_install` copies `tools/<id>/` into `<globalStorage>/tools/<id>/`. The tool is
+  **disabled** on arrival, exactly like one the agent created, until the user ticks its checkbox.
+- `gallery_tool_publish` copies one of the user's tools into a temporary clone, commits it as
+  `tools/<id>/tool.md`, pushes a `tool/<id>-<timestamp>` branch, and returns a pull-request (or
+  compare) link. The read-only clone is never modified; the user reviews and merges the change.
+
+Publishing needs push access. **DeepSeek: Set Zero Gallery Token** stores a GitHub token in VS Code's
+encrypted secret storage; it is used only for that push and is never logged. Without a token, git's
+own credential helper may still supply access. `deepseek.advance.galleryUrl` names the repository, so
+a fork can be used for testing.
 
 **Tasks** is a queue of discrete jobs. **+ Add task** opens an inline form with a title and an
 optional description; each card shows both, its checkbox marks it done, and `x` removes it. **Next
@@ -203,6 +222,7 @@ All settings are under the `deepseek.*` and `deepseek-copilot.*` namespaces.
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `deepseek.advance.harnessWasm` | string | `""` | Path to `advance_harness.wasm`. Empty uses the bundled copy, then a workspace `target/wasm32-unknown-unknown/{release,debug}` build. |
+| `deepseek.advance.galleryUrl` | string | `https://github.com/zikalino/zero-gallery.git` | Git URL of the tool gallery, cloned into `<globalStorage>/zero-gallery`. Point it at a fork to publish there. |
 | `deepseek.advance.allowWrite` | boolean | `true` | Let the Zero agent's built-in file tools create, edit, move and delete files in the first workspace folder. A custom tool or workflow the user has allowed runs its own `write` steps regardless; those writes stay inside the workspace. |
 | `deepseek.advance.allowedCommands` | string[] | `[]` | Programs the built-in shell tool may run. Empty removes the shell tool entirely. A custom tool or workflow the user has allowed runs its own `command` steps regardless. |
 | `deepseek.advance.commandTimeoutSeconds` | number (1–3600) | `120` | How long a Zero command may run before it is killed. |

@@ -22,6 +22,7 @@ import { setAdvanceBridge, type AdvanceBridge } from "./advanceBridge";
 import type { EngineOptions, EngineRequest, EngineResponse } from "./protocol";
 import { advanceSettings, readApiKey, resolveHarnessWasm } from "./settings";
 import { discoverCustomTools } from "./customTools";
+import { ensureGallery, GALLERY_DIR_NAME } from "./galleryRepo";
 import { isWorkflowDocumentId, readWorkflowDocument } from "./workflowFiles";
 import { runWorkflowDocument } from "./workflowRunner";
 import { discoverWorkflowCatalogue } from "./workflows";
@@ -288,10 +289,27 @@ class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
     const customTools = discoverCustomTools(toolsDir.fsPath);
     const workflowCatalogue = discoverWorkflowCatalogue(root.fsPath, this.enabledTools);
 
+    // The gallery is shared by every workspace, so it lives beside the global tools. A clone failure
+    // is reported but never stops the panel: everything else works without a gallery.
+    const galleryDir = vscode.Uri.joinPath(this.context.globalStorageUri, GALLERY_DIR_NAME);
+    const [gallery, githubToken] = await Promise.all([
+      ensureGallery(galleryDir.fsPath, config.galleryUrl),
+      this.context.secrets.get(GITHUB_SECRET_KEY),
+    ]);
+    if (generation !== this.generation) {
+      return;
+    }
+    if (!gallery.ok) {
+      this.postStatus(gallery.message);
+    }
+
     const options: EngineOptions = {
       wasmPath,
       workspace: root.fsPath,
       toolsDir: toolsDir.fsPath,
+      galleryDir: galleryDir.fsPath,
+      galleryUrl: config.galleryUrl,
+      githubToken: githubToken ?? "",
       customTools,
       workflowTools: workflowCatalogue.tools,
       enabledTools: this.enabledTools,
@@ -487,6 +505,30 @@ export function registerAdvancePanel(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("deepseek.advance.openSettings", () =>
       vscode.commands.executeCommand("workbench.action.openSettings", "deepseek.advance"),
     ),
+    vscode.commands.registerCommand("deepseek.advance.setGithubToken", async () => {
+      const value = await vscode.window.showInputBox({
+        title: "GitHub token for publishing to the Zero gallery",
+        prompt:
+          "Used only to push a branch when the agent publishes a tool. Stored in VS Code's " +
+          "encrypted secret storage. Leave empty to clear it.",
+        password: true,
+        ignoreFocusOut: true,
+      });
+      if (value === undefined) {
+        return;
+      }
+      const trimmed = value.trim();
+      if (trimmed.length === 0) {
+        await context.secrets.delete(GITHUB_SECRET_KEY);
+      } else {
+        await context.secrets.store(GITHUB_SECRET_KEY, trimmed);
+      }
+      void vscode.window.showInformationMessage(
+        trimmed.length > 0 ? "Zero: GitHub token saved." : "Zero: GitHub token cleared.",
+      );
+      // The token is handed to the engine at startup, so pick it up now.
+      await panel.restart();
+    }),
     vscode.commands.registerCommand("deepseek.advance.setApiKey", async () => {
       const value = await vscode.window.showInputBox({
         title: "DeepSeek API key for the Zero panel",

@@ -7,7 +7,7 @@
 // The folder is global (it belongs to the extension, not the project), so the harness is granted a
 // `/tools` root for writing one and this module reads the folder back on the next engine start.
 
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, type Dirent } from "node:fs";
 import * as path from "node:path";
 
 import { parseSteps } from "./workflowDoc";
@@ -18,25 +18,50 @@ import {
   type ToolStep,
 } from "./toolCatalogue";
 
-/** Every custom tool in `directory`, in file-name order. */
+/**
+ * Every custom tool in `directory`, in name order.
+ *
+ * A tool the agent creates is a flat `<name>.md`; a tool installed from the gallery is a folder
+ * `<id>/tool.md` (supporting files may sit beside it). Both are the same document to the harness.
+ */
 export function discoverCustomTools(directory: string): CustomToolDefinition[] {
-  let names: string[];
+  let entries: Dirent[];
   try {
-    names = readdirSync(directory).filter((name) => name.toLowerCase().endsWith(".md"));
+    entries = readdirSync(directory, { withFileTypes: true });
   } catch {
     return [];
   }
-  names.sort();
+  entries.sort((a, b) => a.name.localeCompare(b.name));
   const tools: CustomToolDefinition[] = [];
   const seen = new Set<string>();
-  for (const name of names) {
+  for (const entry of entries) {
+    let file: string | undefined;
+    let fallback: string;
+    if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) {
+      file = path.join(directory, entry.name);
+      fallback = entry.name.replace(/\.md$/i, "");
+    } else if (entry.isDirectory()) {
+      fallback = entry.name;
+      for (const candidate of ["tool.md", `${entry.name}.md`, "index.md"]) {
+        const candidatePath = path.join(directory, entry.name, candidate);
+        if (existsSync(candidatePath)) {
+          file = candidatePath;
+          break;
+        }
+      }
+    } else {
+      continue;
+    }
+    if (file === undefined) {
+      continue;
+    }
     let source: string;
     try {
-      source = readFileSync(path.join(directory, name), "utf8");
+      source = readFileSync(file, "utf8");
     } catch {
       continue;
     }
-    const tool = parseCustomTool(source, name.replace(/\.md$/i, ""));
+    const tool = parseCustomTool(source, fallback);
     if (tool === undefined || seen.has(tool.name)) {
       continue;
     }

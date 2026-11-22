@@ -14,6 +14,12 @@ export interface EngineOptions {
   workspace: string;
   /** The global tools folder `/tools` maps to. Custom tools live here, outside any project. */
   toolsDir?: string;
+  /** The cloned public gallery, shared by every workspace. */
+  galleryDir?: string;
+  /** The gallery's git URL (the public repo, or a fork). */
+  galleryUrl?: string;
+  /** A GitHub token used only for publishing a gallery tool. Never logged. */
+  githubToken?: string;
   /** User-defined tools discovered in `toolsDir`. */
   customTools?: CustomToolDefinition[];
   /** Single-script workflows the host exposes as model tools. */

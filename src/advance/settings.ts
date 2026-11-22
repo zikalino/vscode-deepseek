@@ -8,6 +8,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 
 import { SECRET_KEY } from "../consts";
+import { DEFAULT_GALLERY_URL } from "./galleryRepo";
 
 export interface AdvanceSettings {
   apiUrl: string;
@@ -15,6 +16,8 @@ export interface AdvanceSettings {
   allowedCommands: string[];
   allowWrite: boolean;
   commandTimeoutMs: number;
+  /** The public gallery to clone and publish to. */
+  galleryUrl: string;
   /** Dollars per million tokens, for the chat's cost divider (all zero hides the figures). */
   pricing: { inputPerMillion: number; cachedPerMillion: number; outputPerMillion: number };
 }
@@ -31,6 +34,7 @@ export function advanceSettings(): AdvanceSettings {
     allowedCommands: advance.get<string[]>("allowedCommands", []),
     allowWrite: advance.get<boolean>("allowWrite", true),
     commandTimeoutMs: Math.max(1, seconds) * 1000,
+    galleryUrl: advance.get<string>("galleryUrl", DEFAULT_GALLERY_URL).trim() || DEFAULT_GALLERY_URL,
     pricing: {
       inputPerMillion: advance.get<number>("pricing.inputPerMillion", 0),
       cachedPerMillion: advance.get<number>("pricing.cachedPerMillion", 0),

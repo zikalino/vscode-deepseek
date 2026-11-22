@@ -37,6 +37,8 @@ import {
   type ErrorBody,
   type Envelope,
 } from "./abi";
+import { Gallery } from "./gallery";
+import { DEFAULT_GALLERY_URL } from "./galleryRepo";
 import { VirtualPath } from "./vpath";
 
 /** The ABI method names this router implements (`advance_abi::method`). */
@@ -44,6 +46,9 @@ export const METHOD = {
   FS_READ_FILE: "fs/readFile",
   FS_WRITE_FILE: "fs/writeFile",
   FS_WRITE_FILE_GRANTED: "fs/writeFileGranted",
+  GALLERY_SEARCH: "gallery/search",
+  GALLERY_INSTALL: "gallery/install",
+  GALLERY_PUBLISH: "gallery/publish",
   FS_LIST: "fs/list",
   FS_STAT: "fs/stat",
   FS_MKDIR: "fs/mkdir",
@@ -85,6 +90,12 @@ export interface RouterOptions {
   allowedCommands: readonly string[];
   /** How long a command may run before it is killed. */
   commandTimeoutMs: number;
+  /** The cloned public gallery. */
+  galleryDir?: string;
+  /** The gallery's git URL. */
+  galleryUrl?: string;
+  /** A token for publishing; the router never logs it. */
+  githubToken?: string;
 }
 
 /** Answer the harness's capability calls. */
@@ -130,6 +141,12 @@ export class Router {
         // An enabled user tool's write: the Tools view is the permission, not `allowWrite`. Paths
         // still go through `VirtualPath`, so `/workspace` and `/tools` remain the only roots.
         return this.writeFile(payload, true);
+      case METHOD.GALLERY_SEARCH:
+        return this.gallery().search(optionalString(payload, "query") ?? "");
+      case METHOD.GALLERY_INSTALL:
+        return this.gallery().install(stringField(payload, "id"));
+      case METHOD.GALLERY_PUBLISH:
+        return this.gallery().publish(stringField(payload, "id"));
       case METHOD.FS_LIST:
         return { entries: this.list(payload) };
       case METHOD.FS_STAT:
@@ -163,6 +180,20 @@ export class Router {
       default:
         throw new AbiError("unsupported", `this host does not implement \`${method}\``);
     }
+  }
+
+  /** The gallery operations, bound to this host's mirror and tools folder. */
+  private gallery(): Gallery {
+    const toolsDir = this.options.roots.get("tools");
+    if (this.options.galleryDir === undefined || toolsDir === undefined) {
+      throw new AbiError("unavailable", "the Zero gallery is not available");
+    }
+    return new Gallery(
+      this.options.galleryDir,
+      toolsDir,
+      this.options.galleryUrl ?? DEFAULT_GALLERY_URL,
+      this.options.githubToken ?? "",
+    );
   }
 
   // ---- Filesystem --------------------------------------------------------------------------
