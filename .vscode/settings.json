@@ -1,0 +1,7 @@
+{
+  "deepseek.advance.allowedCommands": [
+    "npm",
+    "vsce",
+    "code"
+  ]
+}

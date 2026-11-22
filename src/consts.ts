@@ -31,6 +31,9 @@ export const VSCODE_LM_VENDOR = 'deepseek';
 /** SecretStorage key for the DeepSeek API key */
 export const SECRET_KEY = 'deepseek.apiKey';
 
+/** SecretStorage key a workflow's `setting githubToken` step writes. */
+export const GITHUB_SECRET_KEY = 'deepseek.githubToken';
+
 /** Settings namespace */
 export const SETTINGS_NS = 'deepseek';
 

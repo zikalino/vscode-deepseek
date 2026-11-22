@@ -12,54 +12,22 @@
 // `deepseek.advance.*`.
 
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
 import * as path from "node:path";
 import { Worker } from "node:worker_threads";
 import * as vscode from "vscode";
 
-import { SECRET_KEY } from "../consts";
+import { GITHUB_SECRET_KEY, SECRET_KEY } from "../consts";
+import { setAdvanceBridge, type AdvanceBridge } from "./advanceBridge";
 import type { EngineOptions, EngineRequest, EngineResponse } from "./protocol";
+import { advanceSettings, readApiKey, resolveHarnessWasm } from "./settings";
+import { isWorkflowDocumentId, readWorkflowDocument } from "./workflowFiles";
+import { runWorkflowDocument } from "./workflowRunner";
+
+export { advanceSettings, readApiKey, resolveHarnessWasm } from "./settings";
+export type { AdvanceSettings } from "./settings";
+export { isWorkflowDocumentId, openWorkflowDocument } from "./workflowFiles";
 
 export const ADVANCE_VIEW_ID = "deepseek.advanceView";
-
-export interface AdvanceSettings {
-  apiUrl: string;
-  model: string;
-  allowedCommands: string[];
-  allowWrite: boolean;
-  commandTimeoutMs: number;
-  /** Dollars per million tokens, for the chat's cost divider (all zero hides the figures). */
-  pricing: { inputPerMillion: number; cachedPerMillion: number; outputPerMillion: number };
-}
-
-const DEFAULT_ENDPOINT = "https://api.deepseek.com/chat/completions";
-
-export function advanceSettings(): AdvanceSettings {
-  const config = vscode.workspace.getConfiguration("deepseek");
-  const advance = vscode.workspace.getConfiguration("deepseek.advance");
-  const seconds = advance.get<number>("commandTimeoutSeconds", 120);
-  return {
-    apiUrl: endpoint(config.get<string>("apiEndpoint", DEFAULT_ENDPOINT)),
-    model: config.get<string>("model", "deepseek-v4-flash") || "deepseek-v4-flash",
-    allowedCommands: advance.get<string[]>("allowedCommands", []),
-    allowWrite: advance.get<boolean>("allowWrite", true),
-    commandTimeoutMs: Math.max(1, seconds) * 1000,
-    pricing: {
-      inputPerMillion: advance.get<number>("pricing.inputPerMillion", 0),
-      cachedPerMillion: advance.get<number>("pricing.cachedPerMillion", 0),
-      outputPerMillion: advance.get<number>("pricing.outputPerMillion", 0),
-    },
-  };
-}
-
-/** Append `/chat/completions` unless the URL already names an endpoint. */
-function endpoint(apiUrl: string): string {
-  const trimmed = apiUrl.trim().replace(/\/+$/, "");
-  if (trimmed.length === 0) {
-    return DEFAULT_ENDPOINT;
-  }
-  return trimmed.endsWith("/chat/completions") ? trimmed : `${trimmed}/chat/completions`;
-}
 
 function workspaceRoot(): vscode.Uri | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri;
@@ -69,85 +37,31 @@ function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** The stored key, else the configured key, else the environment. */
-export async function readApiKey(context: vscode.ExtensionContext): Promise<string> {
-  const stored = await context.secrets.get(SECRET_KEY);
-  if (stored !== undefined && stored.length > 0) {
-    return stored;
-  }
-  const configured = vscode.workspace.getConfiguration("deepseek").get<string>("apiKey", "");
-  if (configured.length > 0) {
-    return configured;
-  }
-  return process.env.DEEPSEEK_API_KEY ?? "";
-}
-
-/**
- * Find the harness artifact: the explicit setting, a copy shipped beside the panel, or the build
- * output of a Cargo workspace at the folder (or one level above it, for this repo's layout).
- */
-export function resolveHarnessWasm(workspace: string, extensionPath: string): string | undefined {
-  const explicit = vscode.workspace
-    .getConfiguration("deepseek.advance")
-    .get<string>("harnessWasm", "")
-    .trim();
-  if (explicit.length > 0) {
-    return existsSync(explicit) ? explicit : undefined;
-  }
-  const candidates: string[] = [path.join(extensionPath, "media", "advance_harness.wasm")];
-  const bases = new Set<string>([
-    workspace,
-    path.join(workspace, "advance"),
-    path.dirname(workspace),
-    path.join(path.dirname(workspace), "advance"),
-  ]);
-  for (const profile of ["release", "debug"]) {
-    for (const base of bases) {
-      candidates.push(
-        path.join(base, "target", "wasm32-unknown-unknown", profile, "advance_harness.wasm"),
-      );
-    }
-  }
-  return candidates.find((candidate) => existsSync(candidate));
-}
-
-/** Whether a card's id names a document under the workspace's workflow folder. */
-export function isWorkflowDocumentId(id: string): boolean {
-  const relative = id.trim().replace(/\\/g, "/");
-  return relative.startsWith(".advance/workflows/") && relative.toLowerCase().endsWith(".md");
-}
-
-/**
- * Open a workflow card's document in a preview tab. Returns the failure to report, or `undefined`
- * when the document opened.
- */
-export async function openWorkflowDocument(
-  root: vscode.Uri,
-  id: string,
-): Promise<string | undefined> {
-  const relative = id.trim().replace(/\\/g, "/");
-  if (!isWorkflowDocumentId(relative)) {
-    return "it is not a workflow document";
-  }
-  const target = vscode.Uri.joinPath(root, ...relative.split("/"));
-  try {
-    const document = await vscode.workspace.openTextDocument(target);
-    await vscode.window.showTextDocument(document, { preview: true });
-    return undefined;
-  } catch (error) {
-    return describe(error);
-  }
-}
-
 /** The panel. */
-class Panel implements vscode.WebviewViewProvider {
+class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
   private view: vscode.WebviewView | undefined;
   private worker: Worker | undefined;
   private restartTimer: NodeJS.Timeout | undefined;
+  /** Bumped by every start/stop so an in-flight async start cannot install a stale worker. */
+  private generation = 0;
+  /** The engine is live and can take input. */
+  private ready = false;
+  /** Whether a turn is running, as the harness last reported it (`busy\t1`/`busy\t0`). */
+  private busy = false;
+  /** A queued submission was sent and its turn has not finished yet. */
+  private submitted = false;
+  /** Whether the harness has reported the submitted turn as busy at least once. */
+  private sawBusy = false;
+  /** Whether the next queued submission should bring the chat surface forward first. */
+  private showChat = false;
+  /** Agent prompts and tasks waiting for the engine to be idle, so a second is not refused. */
+  private readonly pending: Array<Record<string, unknown>> = [];
   /** The last theme the webview computed, replayed to every fresh engine instance. */
   private theme: Record<string, unknown> | undefined;
   /** The last canvas size the webview reported, replayed to every fresh engine instance. */
   private size: { width: number; height: number } | undefined;
+  /** The workflow document whose form the panel is showing, when one is open. */
+  private workflowId: string | undefined;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -161,6 +75,7 @@ class Panel implements vscode.WebviewViewProvider {
     });
     view.onDidDispose(() => {
       this.stopEngine();
+      this.pending.length = 0;
       this.view = undefined;
     });
     void this.startEngine();
@@ -169,12 +84,80 @@ class Panel implements vscode.WebviewViewProvider {
   /** Start over: a fresh wasm instance means a fresh conversation. */
   async newChat(): Promise<void> {
     await vscode.commands.executeCommand(`${ADVANCE_VIEW_ID}.focus`);
+    this.pending.length = 0;
     await this.startEngine();
   }
 
   /** Stop the running turn. */
   abort(): void {
     this.send({ type: "input", event: { op: "abort" } });
+    this.turnStopped();
+  }
+
+  /**
+   * The harness's `abort` sets the engine idle without a `turn-done`, so a submission it stopped
+   * must not leave the workflow queue waiting for an outcome that will never arrive.
+   */
+  private turnStopped(): void {
+    this.submitted = false;
+    this.sawBusy = false;
+    this.pump();
+  }
+
+  /** A workflow's `agent` step: send a turn, queued until the engine is idle. */
+  submitPrompt(text: string): void {
+    this.enqueueSubmission({ op: "submit", text });
+  }
+
+  /** A workflow's `task` step: queue the task and start its turn. */
+  submitTask(title: string, description: string, prompt: string): void {
+    this.enqueueSubmission({ op: "submitTask", title, description, prompt });
+  }
+
+  /** A workflow's `setting` step: store the credential where the extension keeps credentials. */
+  async storeSetting(key: string, value: string): Promise<void> {
+    if (key === "apiKey") {
+      await this.context.secrets.store(SECRET_KEY, value);
+      // The key is handed to the engine at startup, so pick it up now when the panel is live.
+      if (this.view !== undefined) {
+        await this.startEngine();
+      }
+      return;
+    }
+    if (key === "githubToken") {
+      await this.context.secrets.store(GITHUB_SECRET_KEY, value);
+      return;
+    }
+    throw new Error(`\`${key}\` is not a setting a workflow may write`);
+  }
+
+  private enqueueSubmission(event: Record<string, unknown>): void {
+    // Reveal the panel so the agent's work is where the user can see it, then queue. If the view is
+    // not resolved yet, `resolveWebviewView` starts the engine and `ready` drains the queue.
+    void vscode.commands.executeCommand(`${ADVANCE_VIEW_ID}.focus`).then(undefined, () => undefined);
+    this.showChat = true;
+    this.pending.push(event);
+    this.pump();
+  }
+
+  /** Send the next queued submission when the engine is live and idle. */
+  private pump(): void {
+    if (!this.ready || this.worker === undefined || this.busy || this.submitted) {
+      return;
+    }
+    const event = this.pending.shift();
+    if (event === undefined) {
+      return;
+    }
+    // A workflow's agent step is usually pressed from the Workflows surface; bring the transcript
+    // forward so the turn is visible, exactly as the desktop's always-on chat pane is.
+    if (this.showChat) {
+      this.showChat = false;
+      this.send({ type: "input", event: { op: "selectSurface", value: "chat" } });
+    }
+    this.send({ type: "input", event });
+    this.submitted = true;
+    this.sawBusy = false;
   }
 
   /** Ask the webview to recompute the VS Code theme and send it again. */
@@ -219,6 +202,11 @@ class Panel implements vscode.WebviewViewProvider {
           this.theme = event;
         }
         this.send(message as EngineRequest);
+        // The webview's Escape/Stop sends `abort` as an input event rather than through `abort()`;
+        // it must clear the same queue state.
+        if (event?.op === "abort") {
+          this.turnStopped();
+        }
         return;
       }
       case "resize": {
@@ -235,6 +223,12 @@ class Panel implements vscode.WebviewViewProvider {
   }
 
   private stopEngine(): void {
+    this.generation += 1;
+    this.ready = false;
+    this.busy = false;
+    this.submitted = false;
+    this.sawBusy = false;
+    this.workflowId = undefined;
     const worker = this.worker;
     this.worker = undefined;
     if (worker !== undefined) {
@@ -257,13 +251,17 @@ class Panel implements vscode.WebviewViewProvider {
       );
       return;
     }
+    this.stopEngine();
+    const generation = this.generation;
     const config = advanceSettings();
     const apiKey = await readApiKey(this.context);
+    if (generation !== this.generation) {
+      return;
+    }
     if (apiKey.length === 0) {
       this.postStatus("No DeepSeek API key yet — run “DeepSeek: Set Advance API Key”.");
     }
 
-    this.stopEngine();
     // A fresh engine replaces the whole conversation. Clear the old frame first: if the new engine
     // cannot start, the user sees an empty panel and the status, not the conversation they left.
     void this.view?.webview.postMessage({ type: "clear" });
@@ -317,12 +315,57 @@ class Panel implements vscode.WebviewViewProvider {
       case "openWorkflow":
         await this.openWorkflow(message.path);
         return;
+      case "workflowRun": {
+        const id = this.workflowId;
+        const root = workspaceRoot();
+        if (id === undefined || root === undefined) {
+          return;
+        }
+        try {
+          await runWorkflowDocument(this.context, root, id, {
+            script: message.script,
+            values: message.values,
+          });
+        } catch (error) {
+          this.postStatus(`could not run ${id}: ${describe(error)}`);
+        }
+        return;
+      }
+      case "workflowClose":
+        this.workflowId = undefined;
+        return;
+      case "busy":
+        this.busy = message.busy;
+        if (message.busy) {
+          // Only a turn that actually ran can end without `turn-done` (the harness's own Stop
+          // control calls `engine.abort()`, which reports nothing). The stale `busy\t0` drawn
+          // before a just-sent prompt arrived must not count as that.
+          this.sawBusy = true;
+          return;
+        }
+        if (this.submitted && this.sawBusy) {
+          this.submitted = false;
+        }
+        this.sawBusy = false;
+        this.pump();
+        return;
+      case "turnDone":
+        // A turn that could not start reports `turn-done` without ever being `busy`; the next
+        // queued prompt must not wait for a busy transition that will not come.
+        this.submitted = false;
+        if (!this.busy) {
+          this.sawBusy = false;
+          this.pump();
+        }
+        return;
       case "ready":
+        this.ready = true;
         // The guest is live: hand it the theme the webview computed before it existed (or before
         // this restart), so it never draws a frame in the wrong palette.
         if (this.theme !== undefined) {
           this.send({ type: "input", event: this.theme });
         }
+        this.pump();
         return;
       case "error":
         this.postStatus(message.message);
@@ -334,20 +377,26 @@ class Panel implements vscode.WebviewViewProvider {
   }
 
   /**
-   * A workflow card was pressed: the harness cannot run a step (the allowlist and the executor are
-   * the host's), so it asks for the document to be opened and the user runs it from there.
+   * A workflow card was pressed: the harness cannot read `.advance/workflows`, so the host reads the
+   * document and asks the module to draw its form. Run is pressed in the form, never here.
    */
   private async openWorkflow(id: string): Promise<void> {
     const root = workspaceRoot();
     // Only a document under the workflow folder: the id is what the harness built the card from,
-    // and a card that names anything else has no file to open.
+    // and a card that names anything else has no form to draw.
     if (root === undefined || !isWorkflowDocumentId(id)) {
       return;
     }
-    const problem = await openWorkflowDocument(root, id);
-    if (problem !== undefined) {
-      this.postStatus(`could not open ${id}: ${problem}`);
+    const document = readWorkflowDocument(root, id);
+    if (document === undefined) {
+      this.postStatus(`could not read ${id}`);
+      return;
     }
+    this.workflowId = id;
+    this.send({
+      type: "input",
+      event: { op: "workflowForm", title: document.title, source: document.source },
+    });
   }
 }
 
@@ -389,7 +438,11 @@ function escapeHtml(text: string): string {
 /** Register the Advance panel, its commands, and its configuration listener. */
 export function registerAdvancePanel(context: vscode.ExtensionContext): void {
   const panel = new Panel(context);
+  // Workflow `agent`/`task`/`setting` steps reach the panel through this, so the runner never has to
+  // import the panel (which imports the runner to answer a card's Run).
+  setAdvanceBridge(panel);
   context.subscriptions.push(
+    { dispose: () => setAdvanceBridge(undefined) },
     vscode.window.registerWebviewViewProvider(ADVANCE_VIEW_ID, panel, {
       webviewOptions: { retainContextWhenHidden: true },
     }),

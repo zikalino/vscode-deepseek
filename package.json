@@ -38,6 +38,8 @@
     "onCommand:deepseek.advance.newChat",
     "onCommand:deepseek.advance.abort",
     "onCommand:deepseek.advance.runWorkflow",
+    "onCommand:deepseek.advance.showWorkflow",
+    "onCommand:deepseek.advance.openWorkflowDocument",
     "onCommand:deepseek.advance.setApiKey",
     "onCommand:deepseek.advance.openSettings"
   ],
@@ -96,6 +98,18 @@
         "title": "Run Workflow...",
         "category": "DeepSeek",
         "icon": "$(play)"
+      },
+      {
+        "command": "deepseek.advance.showWorkflow",
+        "title": "Show Workflow...",
+        "category": "DeepSeek",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "deepseek.advance.openWorkflowDocument",
+        "title": "Open Workflow Document...",
+        "category": "DeepSeek",
+        "icon": "$(go-to-file)"
       },
       {
         "command": "deepseek.advance.setApiKey",
@@ -195,6 +209,11 @@
           "command": "deepseek.advance.setApiKey",
           "when": "view == deepseek.advanceView",
           "group": "navigation@2"
+        },
+        {
+          "command": "deepseek.advance.openWorkflowDocument",
+          "when": "view == deepseek.advanceView",
+          "group": "navigation@3"
         }
       ],
       "commandPalette": [
@@ -212,6 +231,12 @@
         },
         {
           "command": "deepseek.advance.runWorkflow"
+        },
+        {
+          "command": "deepseek.advance.showWorkflow"
+        },
+        {
+          "command": "deepseek.advance.openWorkflowDocument"
         },
         {
           "command": "deepseek.advance.setApiKey"

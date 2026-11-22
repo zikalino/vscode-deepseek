@@ -42,6 +42,11 @@ export interface EngineOptions {
    * workflow tab passes the one document the user picked.
    */
   workflowItems?: WorkflowBrief[];
+  /**
+   * The workflow document the module should draw as a form. The harness renders the markdown form
+   * itself (fields, prose and `script` buttons); unset is the ordinary surface.
+   */
+  workflowForm?: { title: string; source: string };
 }
 
 /** Messages the extension host sends to the worker. */
@@ -56,4 +61,15 @@ export type EngineResponse =
   | { type: "status"; message: string }
   | { type: "ready" }
   | { type: "openWorkflow"; path: string }
+  /** The harness's `busy\t1`/`busy\t0`, so the host can hand it one prompt at a time. */
+  | { type: "busy"; busy: boolean }
+  /** The harness's `turn-done`, which also arrives when a turn could not start at all. */
+  | { type: "turnDone" }
+  /**
+   * A workflow form's `script` button was pressed. The host owns the executor, so it runs the
+   * script with these answers.
+   */
+  | { type: "workflowRun"; script: string; values: Record<string, string> }
+  /** The workflow form's close button was pressed. */
+  | { type: "workflowClose" }
   | { type: "error"; message: string };

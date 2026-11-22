@@ -43,8 +43,45 @@ function emitLogs(scene: string): void {
     const [verb, ...rest] = line.split("\t");
     if (verb === "openWorkflow" && rest.length > 0) {
       post({ type: "openWorkflow", path: rest.join("\t") });
+    } else if (verb === "workflowRun" && rest.length > 0) {
+      const run = parseRun(rest.join("\t"));
+      if (run !== undefined) {
+        post({ type: "workflowRun", script: run.script, values: run.values });
+      }
+    } else if (verb === "workflowClose") {
+      post({ type: "workflowClose" });
+    } else if (verb === "busy") {
+      post({ type: "busy", busy: rest[0] === "1" });
+    } else if (verb === "turn-done") {
+      post({ type: "turnDone" });
     }
   }
+}
+
+/** The `workflowRun` line's payload: the script's id and the form's answers. */
+function parseRun(json: string): { script: string; values: Record<string, string> } | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(parsed) || typeof parsed.script !== "string") {
+    return undefined;
+  }
+  const values: Record<string, string> = {};
+  if (isRecord(parsed.values)) {
+    for (const [key, value] of Object.entries(parsed.values)) {
+      if (typeof value === "string") {
+        values[key] = value;
+      }
+    }
+  }
+  return { script: parsed.script, values };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 let width = Math.max(1, Math.floor(options.width ?? 800));
@@ -150,6 +187,15 @@ function start(): void {
     // This engine's webview (media/panel.js) turns a spinner on its own clock, so the module hands
     // it one instead of drawing dots that would freeze whenever a tool call blocks this thread.
     guest.input({ op: "hostSpins", value: true });
+    // A workflow tab asks for one document as a form rather than the Workflows list. It goes last
+    // so the surface, bar and list setup above cannot clear it.
+    if (options.workflowForm !== undefined) {
+      guest.input({
+        op: "workflowForm",
+        title: options.workflowForm.title,
+        source: options.workflowForm.source,
+      });
+    }
 
     // Apply the VS Code theme before the first frame when the webview has already computed it;
     // otherwise the panel replays it once this worker reports ready.

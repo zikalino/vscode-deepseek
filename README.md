@@ -105,12 +105,18 @@ menu (or **DeepSeek: Set Advance API Key**).
 The panel is multi-surface. The bar along its top switches between **Agent** (the conversation),
 **Tasks**, **Tools** (the calls the agent may make under the current grant), **Workflows** and
 **Settings**. Settings is a destination in that bar rather than a separate button beside it. Workflows
-are the documents in `.advance/workflows/*.md`, and pressing a card opens its document in the editor.
+are the documents in `.advance/workflows/*.md`, and pressing a card opens its form: the same
+WASM-rendered markdown form the desktop Advance sets a workflow in, with its fields and its `script`
+buttons. The module draws the form; the host only runs the script the form's **Run** presses.
 
-**DeepSeek: Run Workflow...** lists those documents and opens the one you pick in a new editor tab.
-The tab is a second host of the same WASM module, told to draw its **Workflows** surface with just that
-workflow, so the card is rendered by the module rather than by the editor's DOM. Its **Run** pill opens
-the workflow's document, where you can review or edit the steps.
+**DeepSeek: Run Workflow...** and **DeepSeek: Show Workflow...** open the chosen workflow in a
+WASM-rendered tab showing that form. Filling the fields and pressing a script's **Run** runs that
+script's steps in order: commands in the workspace under `deepseek.advance.allowedCommands`, `write`
+steps under `deepseek.advance.allowWrite`, and `agent` steps as turns in the Advance chat. Progress and
+output are in the **DeepSeek Workflows** output channel. If a command's program is not allowlisted, the
+prompt offers to add the missing programs and run; declining runs nothing.
+
+**DeepSeek: Open Workflow Document...** opens the source, where you can review or edit the steps.
 
 **Tasks** is a queue of discrete jobs. **+ Add task** opens an inline form with a title and an
 optional description; each card shows both, its checkbox marks it done, and `x` removes it. **Next
@@ -181,7 +187,9 @@ Commands marked with 🔍 are accessible from the **F1 command palette**.
 | 🔍 `deepseek.showLogs` | DeepSeek: Browse Failed Requests | Browse the failed-request dumps in `.smartercode/deepseek-failures/`. |
 | 🔍 `deepseek.advance.newChat` | DeepSeek: New Advance Chat | Start a fresh conversation in the Advance panel. |
 | 🔍 `deepseek.advance.abort` | DeepSeek: Stop the Advance Turn | Cancel the current Advance turn. |
-| 🔍 `deepseek.advance.runWorkflow` | DeepSeek: Run Workflow... | List the workspace's workflows and open the chosen one in a WASM-rendered tab. |
+| 🔍 `deepseek.advance.runWorkflow` | DeepSeek: Run Workflow... | List the workspace's workflows and open the chosen one's WASM form; its Run starts the script. |
+| 🔍 `deepseek.advance.showWorkflow` | DeepSeek: Show Workflow... | Open the chosen workflow's WASM form in a tab. |
+| 🔍 `deepseek.advance.openWorkflowDocument` | DeepSeek: Open Workflow Document... | Open the chosen workflow's markdown source to review or edit. |
 | 🔍 `deepseek.advance.setApiKey` | DeepSeek: Set Advance API Key | Store or clear the API key used by the Advance panel. |
 | 🔍 `deepseek.advance.openSettings` | DeepSeek: Configure Advance | Open the `deepseek.advance.*` settings in VS Code. |
 

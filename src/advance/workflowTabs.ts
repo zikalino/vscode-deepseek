@@ -1,13 +1,13 @@
-// The workflow tab: one workflow, drawn by the harness's Workflows surface.
+// The workflow tab: one workflow, drawn by the harness as a markdown form.
 //
-// `DeepSeek: Run Workflow...` discovers `.advance/workflows/*.md`, lets the user pick one, and opens
-// this tab. The tab hosts `advance_harness.wasm` on a worker thread exactly like the Advance panel
-// does; it only differs in what it tells the module to draw: the Workflows surface, with a list that
-// holds the one workflow the user picked. The module is the painter, so the card is the same card
-// the Advance panel's Workflows surface draws.
+// `DeepSeek: Show Workflow...` and `DeepSeek: Run Workflow...` discover `.advance/workflows/*.md`,
+// let the user pick one, and open this tab. The tab hosts `advance_harness.wasm` on a worker thread
+// exactly like the Advance panel does; it only differs in what it tells the module to draw: the
+// workflow's own form, with its fields and `script` buttons.
 //
-// The harness cannot run a step (the allowlist and the executor are the host's), so the card's Run
-// pill is a request to open the document; that is what the card does in the Advance panel too.
+// The harness cannot run a step (the allowlist and the executor are the host's), so a script's Run is
+// a request. The form reports it as `workflowRun` with the answers its fields hold, and the host
+// answers it with `runWorkflowDocument`. `Open Workflow Document...` is the way to the source.
 
 import * as path from "node:path";
 import { Worker } from "node:worker_threads";
@@ -22,9 +22,15 @@ import {
   resolveHarnessWasm,
 } from "./panel";
 import type { EngineOptions, EngineRequest, EngineResponse } from "./protocol";
+import { readWorkflowDocument } from "./workflowFiles";
 import { discoverWorkflows, type WorkflowBrief } from "./workflows";
+import { runWorkflowDocument } from "./workflowRunner";
 
 const VIEW_TYPE = "deepseek.advanceWorkflow";
+
+function describe(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 /** One workflow picker row, carrying the workflow it names. */
 interface WorkflowPick extends vscode.QuickPickItem {
@@ -34,27 +40,35 @@ interface WorkflowPick extends vscode.QuickPickItem {
 /** The open workflow tabs, keyed by workflow id so the same document is not opened twice. */
 const tabs = new Map<string, WorkflowTab>();
 
-/** Register `DeepSeek: Run Workflow...`. */
+/** Register the workflow commands. */
 export function registerWorkflowCommand(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand("deepseek.advance.runWorkflow", () => runWorkflow(context)),
+    vscode.commands.registerCommand("deepseek.advance.showWorkflow", () => showWorkflow(context)),
+    vscode.commands.registerCommand("deepseek.advance.openWorkflowDocument", () =>
+      openWorkflowSource(),
+    ),
   );
 }
 
-async function runWorkflow(context: vscode.ExtensionContext): Promise<void> {
+/** The one picker all three workflow commands share. */
+async function chooseWorkflow(
+  title: string,
+  placeHolder: string,
+): Promise<{ root: vscode.Uri; workflow: WorkflowBrief } | undefined> {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri;
   if (root === undefined) {
     void vscode.window.showInformationMessage(
       "Open a folder first: workflows live in .advance/workflows of the workspace.",
     );
-    return;
+    return undefined;
   }
   const workflows = discoverWorkflows(root.fsPath);
   if (workflows.length === 0) {
     void vscode.window.showInformationMessage(
       "No workflows found. Add a .md document under .advance/workflows, or ask the Advance agent to create one.",
     );
-    return;
+    return undefined;
   }
   const picked = await vscode.window.showQuickPick<WorkflowPick>(
     workflows.map((workflow) => ({
@@ -66,22 +80,54 @@ async function runWorkflow(context: vscode.ExtensionContext): Promise<void> {
       workflow,
     })),
     {
-      title: "Run Workflow",
-      placeHolder: "Select a workflow to render",
+      title,
+      placeHolder,
       matchOnDescription: true,
       matchOnDetail: true,
     },
   );
-  if (picked === undefined) {
+  return picked === undefined ? undefined : { root, workflow: picked.workflow };
+}
+
+/** `DeepSeek: Run Workflow...`: pick one and open its form, so Run is the user's decision. */
+async function runWorkflow(context: vscode.ExtensionContext): Promise<void> {
+  await openWorkflowTab(context, "Run Workflow", "Select a workflow to run");
+}
+
+/** `DeepSeek: Show Workflow...`: open the harness-rendered form. */
+async function showWorkflow(context: vscode.ExtensionContext): Promise<void> {
+  await openWorkflowTab(context, "Show Workflow", "Select a workflow to show");
+}
+
+/** The picker both commands share; the form's Run is what actually starts a script. */
+async function openWorkflowTab(
+  context: vscode.ExtensionContext,
+  title: string,
+  placeHolder: string,
+): Promise<void> {
+  const choice = await chooseWorkflow(title, placeHolder);
+  if (choice === undefined) {
     return;
   }
-  const existing = tabs.get(picked.workflow.id);
+  const existing = tabs.get(choice.workflow.id);
   if (existing !== undefined) {
     existing.reveal();
-    existing.refresh(picked.workflow);
+    existing.refresh(choice.workflow);
     return;
   }
-  tabs.set(picked.workflow.id, new WorkflowTab(context, root, picked.workflow));
+  tabs.set(choice.workflow.id, new WorkflowTab(context, choice.root, choice.workflow));
+}
+
+/** `DeepSeek: Open Workflow Document...`: open the source to review or edit. */
+async function openWorkflowSource(): Promise<void> {
+  const choice = await chooseWorkflow("Open Workflow Document", "Select a workflow to open");
+  if (choice === undefined) {
+    return;
+  }
+  const problem = await openWorkflowDocument(choice.root, choice.workflow.id);
+  if (problem !== undefined) {
+    void vscode.window.showErrorMessage(`Could not open ${choice.workflow.id}: ${problem}`);
+  }
 }
 
 /** One editor tab, with its own engine worker and its own scene. */
@@ -204,6 +250,10 @@ class WorkflowTab {
     if (generation !== this.generation) {
       return;
     }
+    const document = readWorkflowDocument(this.root, this.workflow.id);
+    if (document === undefined) {
+      this.postStatus(`could not read ${this.workflow.id}`);
+    }
     const options: EngineOptions = {
       wasmPath,
       workspace: this.root.fsPath,
@@ -220,6 +270,8 @@ class WorkflowTab {
       surface: "workflows",
       bar: false,
       workflowItems: [this.workflow],
+      workflowForm:
+        document === undefined ? undefined : { title: document.title, source: document.source },
     };
     const worker = new Worker(
       path.join(this.context.extensionPath, "out", "advance", "engine-worker.js"),
@@ -257,6 +309,12 @@ class WorkflowTab {
       case "openWorkflow":
         await this.openWorkflow(message.path);
         return;
+      case "workflowRun":
+        await this.runWorkflow(message.script, message.values);
+        return;
+      case "workflowClose":
+        this.panel.dispose();
+        return;
       case "ready":
         // The guest is live: hand it the theme the webview computed before it existed.
         if (this.theme !== undefined) {
@@ -272,14 +330,28 @@ class WorkflowTab {
     }
   }
 
-  /** The card's Run pill: the harness asks for the document, and the user runs it from there. */
+  /** A script button in the form: run the script with the answers the form held. */
+  private async runWorkflow(script: string, values: Record<string, string>): Promise<void> {
+    try {
+      await runWorkflowDocument(this.context, this.root, this.workflow.id, { script, values });
+    } catch (error) {
+      this.postStatus(`could not run ${this.workflow.id}: ${describe(error)}`);
+    }
+  }
+
+  /** A card from the Workflows surface: show the document's form, never run it here. */
   private async openWorkflow(id: string): Promise<void> {
-    if (!isWorkflowDocumentId(id)) {
+    if (!isWorkflowDocumentId(id) || id.trim().replace(/\\/g, "/") !== this.workflow.id) {
       return;
     }
-    const problem = await openWorkflowDocument(this.root, id);
-    if (problem !== undefined) {
-      this.postStatus(`could not open ${id}: ${problem}`);
+    const document = readWorkflowDocument(this.root, this.workflow.id);
+    if (document === undefined) {
+      this.postStatus(`could not read ${this.workflow.id}`);
+      return;
     }
+    this.send({
+      type: "input",
+      event: { op: "workflowForm", title: document.title, source: document.source },
+    });
   }
 }

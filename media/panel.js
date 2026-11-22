@@ -296,6 +296,19 @@
     } else if (event.key === "Escape") {
       post({ type: "input", event: { op: "abort" } });
       event.preventDefault();
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "Home" || event.key === "End") {
+      post({
+        type: "input",
+        event: {
+          op: "move",
+          key: event.key.replace("Arrow", "").toLowerCase(),
+          shift: event.shiftKey
+        }
+      });
+      event.preventDefault();
+    } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+      post({ type: "input", event: { op: "selectAll" } });
+      event.preventDefault();
     } else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
       post({ type: "input", event: { op: "char", ch: event.key } });
       event.preventDefault();
