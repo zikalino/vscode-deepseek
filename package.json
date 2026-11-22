@@ -4,6 +4,10 @@
   "description": "DeepSeek-powered coding assistant for VS Code with Copilot integration and an autonomous Zero panel.",
   "license": "ISC",
   "author": "",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zikalino/vscode-deepseek.git"
+  },
   "icon": "imgs/logo.png",
   "type": "commonjs",
   "main": "./out/extension.js",
@@ -57,7 +61,7 @@
         {
           "id": "deepseek-advance",
           "title": "Zero",
-          "icon": "media/zero.svg"
+          "icon": "$(circle-slash)"
         }
       ]
     },
