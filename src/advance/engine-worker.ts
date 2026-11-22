@@ -149,6 +149,12 @@ function start(): void {
     // it one instead of drawing dots that would freeze whenever a tool call blocks this thread.
     guest.input({ op: "hostSpins", value: true });
 
+    // Apply the VS Code theme before the first frame when the webview has already computed it;
+    // otherwise the panel replays it once this worker reports ready.
+    if (options.theme !== undefined) {
+      guest.input({ op: "theme", theme: options.theme });
+    }
+
     post({ type: "ready" });
     render();
     // Keep the module pumped: `abi_frame` advances the agent loop and drains the fetch queue.

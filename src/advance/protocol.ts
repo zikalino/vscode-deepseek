@@ -19,6 +19,8 @@ export interface EngineOptions {
   commandTimeoutMs: number;
   /** Dollars per million tokens, handed to the harness for its cost divider. */
   pricing: { inputPerMillion: number; cachedPerMillion: number; outputPerMillion: number };
+  /** The VS Code theme the webview computed, applied before the first frame when known. */
+  theme?: Record<string, unknown>;
 }
 
 /** Messages the extension host sends to the worker. */

@@ -74,6 +74,8 @@ class Panel implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
   private worker: Worker | undefined;
   private restartTimer: NodeJS.Timeout | undefined;
+  /** The last theme the webview computed, replayed to every fresh engine instance. */
+  private theme: Record<string, unknown> | undefined;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -101,6 +103,11 @@ class Panel implements vscode.WebviewViewProvider {
   /** Stop the running turn. */
   abort(): void {
     this.send({ type: "input", event: { op: "abort" } });
+  }
+
+  /** Ask the webview to recompute the VS Code theme and send it again. */
+  refreshTheme(): void {
+    void this.view?.webview.postMessage({ type: "refreshTheme" });
   }
 
   /** Re-read the configuration and restart the engine. */
@@ -132,7 +139,16 @@ class Panel implements vscode.WebviewViewProvider {
     switch (command.type) {
       case "ready":
         return;
-      case "input":
+      case "input": {
+        const event = (message as { event?: Record<string, unknown> }).event;
+        // Keep the theme: a restarted engine needs it replayed, and the webview cannot know when
+        // the worker's guest is ready.
+        if (event?.op === "theme") {
+          this.theme = event;
+        }
+        this.send(message as EngineRequest);
+        return;
+      }
       case "resize":
         this.send(message as EngineRequest);
         return;
@@ -181,6 +197,7 @@ class Panel implements vscode.WebviewViewProvider {
       allowedCommands: config.allowedCommands,
       commandTimeoutMs: config.commandTimeoutMs,
       pricing: config.pricing,
+      theme: this.theme,
     };
     const worker = new Worker(
       path.join(this.context.extensionPath, "out", "advance", "engine-worker.js"),
@@ -212,6 +229,11 @@ class Panel implements vscode.WebviewViewProvider {
         await this.openWorkflow(message.path);
         return;
       case "ready":
+        // The guest is live: hand it the theme the webview computed before it existed (or before
+        // this restart), so it never draws a frame in the wrong palette.
+        if (this.theme !== undefined) {
+          this.send({ type: "input", event: this.theme });
+        }
         return;
       case "error":
         this.postStatus(message.message);
@@ -294,6 +316,7 @@ class Panel implements vscode.WebviewViewProvider {
   private html(webview: vscode.Webview, media: vscode.Uri): string {
     const nonce = randomBytes(16).toString("base64");
     const style = webview.asWebviewUri(vscode.Uri.joinPath(media, "panel.css"));
+    const theme = webview.asWebviewUri(vscode.Uri.joinPath(media, "theme.js"));
     const script = webview.asWebviewUri(vscode.Uri.joinPath(media, "panel.js"));
     return `<!DOCTYPE html>
 <html lang="en">
@@ -309,6 +332,7 @@ class Panel implements vscode.WebviewViewProvider {
   <canvas id="screen" tabindex="0" aria-label="Advance"></canvas>
   <span id="status" role="status"></span>
 </div>
+<script nonce="${nonce}" src="${theme}"></script>
 <script nonce="${nonce}" src="${script}"></script>
 </body>
 </html>`;
@@ -354,5 +378,6 @@ export function registerAdvancePanel(context: vscode.ExtensionContext): void {
         panel.scheduleRestart();
       }
     }),
+    vscode.window.onDidChangeActiveColorTheme(() => panel.refreshTheme()),
   );
 }

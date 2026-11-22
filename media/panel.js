@@ -151,13 +151,57 @@
   function post(message) {
     vscode.postMessage(message);
   }
+  var lastThemeJson = "";
+  function themeBackground() {
+    if (window.advanceTheme) {
+      return css(window.advanceTheme.computeTheme().background);
+    }
+    if (typeof getComputedStyle === "function") {
+      const value = getComputedStyle(document.documentElement)
+        .getPropertyValue("--vscode-editor-background")
+        .trim();
+      if (value.length > 0) {
+        return value;
+      }
+    }
+    return "#191a24";
+  }
+  function sendTheme(force) {
+    if (!window.advanceTheme) {
+      return;
+    }
+    const theme = window.advanceTheme.computeTheme();
+    const json = JSON.stringify(theme);
+    if (!force && json === lastThemeJson) {
+      return;
+    }
+    lastThemeJson = json;
+    post({ type: "input", event: { op: "theme", theme } });
+    if (scene === null) {
+      draw();
+    }
+  }
+  function watchTheme() {
+    if (typeof MutationObserver !== "function") {
+      return;
+    }
+    const observer = new MutationObserver(() => sendTheme(true));
+    observer.observe(document.body, {
+      attributes: true,
+      attributeFilter: ["class", "style", "data-vscode-theme-id", "data-vscode-theme-kind"]
+    });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "style"]
+    });
+  }
   function draw() {
     if (scene) {
       renderScene(ctx, scene, dpr);
       return;
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = "#191a24";
+    ctx.fillStyle = themeBackground();
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
   function drawSpinner(spinner, frame) {
@@ -279,10 +323,18 @@
       case "status":
         status.textContent = message.message ?? "";
         return;
+      case "refreshTheme":
+        sendTheme(true);
+        return;
       default:
         return;
     }
   });
+  watchTheme();
+  sendTheme(true);
+  // Some hosts apply the theme data just after the content scripts run; re-check once the first
+  // paint settles so a late theme does not leave the canvas on the fallback palette.
+  setTimeout(() => sendTheme(false), 0);
   resize();
   canvas.focus();
   post({ type: "ready" });

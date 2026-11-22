@@ -212,6 +212,10 @@ The panel is multi-surface. The bar along its top switches between **Agent** (th
 gear opens the provider settings. Workflows are the documents in `.advance/workflows/*.md`, and
 pressing a card opens its document in the editor.
 
+The panel follows the active VS Code colour theme (dark, light, and high contrast). It reads the
+workbench's `--vscode-*` colours, maps them to the module's palette, and re-sends them when the theme
+changes.
+
 The bundled host and module come from the MIT-licensed
 [Advance project](https://github.com/zikalino/advance); see
 `THIRD-PARTY-NOTICES/advance-MIT-license.txt` for the notice.
