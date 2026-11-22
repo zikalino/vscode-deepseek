@@ -17,7 +17,8 @@ import * as path from "node:path";
 import { Worker } from "node:worker_threads";
 import * as vscode from "vscode";
 
-import { GITHUB_SECRET_KEY, SECRET_KEY } from "../consts";
+import { SECRET_KEY } from "../consts";
+import { GitHubAuth } from "../githubAuth";
 import { setAdvanceBridge, type AdvanceBridge } from "./advanceBridge";
 import type { EngineOptions, EngineRequest, EngineResponse } from "./protocol";
 import { advanceSettings, readApiKey, resolveHarnessWasm } from "./settings";
@@ -72,7 +73,10 @@ class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
   /** The workspace's allow/disable choices, kept in memory so two quick ticks cannot lose one. */
   private enabledTools: Record<string, boolean> = {};
 
-  constructor(private readonly context: vscode.ExtensionContext) {}
+  constructor(
+    private readonly context: vscode.ExtensionContext,
+    private readonly github: GitHubAuth,
+  ) {}
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
@@ -125,19 +129,14 @@ class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
 
   /** A workflow's `setting` step: store the credential where the extension keeps credentials. */
   async storeSetting(key: string, value: string): Promise<void> {
-    if (key === "apiKey") {
-      await this.context.secrets.store(SECRET_KEY, value);
-      // The key is handed to the engine at startup, so pick it up now when the panel is live.
-      if (this.view !== undefined) {
-        await this.startEngine();
-      }
-      return;
+    if (key !== "apiKey") {
+      throw new Error(`\`${key}\` is not a setting a workflow may write`);
     }
-    if (key === "githubToken") {
-      await this.context.secrets.store(GITHUB_SECRET_KEY, value);
-      return;
+    await this.context.secrets.store(SECRET_KEY, value);
+    // The key is handed to the engine at startup, so pick it up now when the panel is live.
+    if (this.view !== undefined) {
+      await this.startEngine();
     }
-    throw new Error(`\`${key}\` is not a setting a workflow may write`);
   }
 
   private enqueueSubmission(event: Record<string, unknown>): void {
@@ -181,6 +180,10 @@ class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
 
   /** Debounced restart, so a settings burst does not spin up a worker per keystroke. */
   scheduleRestart(): void {
+    // With no resolved view there is no engine to refresh; the next resolve starts a fresh one.
+    if (this.view === undefined) {
+      return;
+    }
     if (this.restartTimer !== undefined) {
       clearTimeout(this.restartTimer);
     }
@@ -294,7 +297,7 @@ class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
     const galleryDir = vscode.Uri.joinPath(this.context.globalStorageUri, GALLERY_DIR_NAME);
     const [gallery, githubToken] = await Promise.all([
       ensureGallery(galleryDir.fsPath, config.galleryUrl),
-      this.context.secrets.get(GITHUB_SECRET_KEY),
+      this.github.getToken(),
     ]);
     if (generation !== this.generation) {
       return;
@@ -526,7 +529,8 @@ function escapeHtml(text: string): string {
 
 /** Register the Advance panel, its commands, and its configuration listener. */
 export function registerAdvancePanel(context: vscode.ExtensionContext): void {
-  const panel = new Panel(context);
+  const github = new GitHubAuth();
+  const panel = new Panel(context, github);
   // Workflow `agent`/`task`/`setting` steps reach the panel through this, so the runner never has to
   // import the panel (which imports the runner to answer a card's Run).
   setAdvanceBridge(panel);
@@ -540,30 +544,45 @@ export function registerAdvancePanel(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("deepseek.advance.openSettings", () =>
       vscode.commands.executeCommand("workbench.action.openSettings", "deepseek.advance"),
     ),
-    vscode.commands.registerCommand("deepseek.advance.setGithubToken", async () => {
-      const value = await vscode.window.showInputBox({
-        title: "GitHub token for publishing to the Zero gallery",
-        prompt:
-          "Used only to push a branch when the agent publishes a tool. Stored in VS Code's " +
-          "encrypted secret storage. Leave empty to clear it.",
-        password: true,
-        ignoreFocusOut: true,
-      });
-      if (value === undefined) {
+    vscode.commands.registerCommand("deepseek.advance.githubSignIn", async () => {
+      const existing = await github.getIdentity();
+      if (existing !== undefined) {
+        void vscode.window.showInformationMessage(
+          `GitHub: already signed in as ${existing.label}.`,
+        );
         return;
       }
-      const trimmed = value.trim();
-      if (trimmed.length === 0) {
-        await context.secrets.delete(GITHUB_SECRET_KEY);
-      } else {
-        await context.secrets.store(GITHUB_SECRET_KEY, trimmed);
+      const session = await github.signIn();
+      if (session === undefined) {
+        void vscode.window.showWarningMessage(
+          "GitHub sign-in did not complete. If the built-in GitHub Authentication extension is " +
+            "disabled, enable it and try again.",
+        );
+        return;
       }
       void vscode.window.showInformationMessage(
-        trimmed.length > 0 ? "Zero: GitHub token saved." : "Zero: GitHub token cleared.",
+        `GitHub: signed in as ${session.account.label}.`,
       );
       // The token is handed to the engine at startup, so pick it up now.
-      await panel.restart();
+      panel.scheduleRestart();
     }),
+    vscode.commands.registerCommand("deepseek.advance.githubSignOut", async () => {
+      const identity = await github.getIdentity();
+      if (identity === undefined) {
+        void vscode.window.showInformationMessage("GitHub: not signed in.");
+        return;
+      }
+      if (!(await github.signOut())) {
+        void vscode.window.showWarningMessage(
+          `GitHub: ${identity.label} is still signed in. Use the Accounts menu to sign out.`,
+        );
+        return;
+      }
+      void vscode.window.showInformationMessage(`GitHub: signed out ${identity.label}.`);
+      panel.scheduleRestart();
+    }),
+    // Also covers a sign-out from VS Code's Accounts menu, which is the only stable sign-out UI.
+    github.onDidChangeSessions(() => panel.scheduleRestart()),
     vscode.commands.registerCommand("deepseek.advance.setApiKey", async () => {
       const value = await vscode.window.showInputBox({
         title: "DeepSeek API key for the Zero panel",

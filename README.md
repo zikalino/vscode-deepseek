@@ -177,10 +177,12 @@ built-in tools use it:
   `tools/<id>/tool.md`, pushes a `tool/<id>-<timestamp>` branch, and returns a pull-request (or
   compare) link. The read-only clone is never modified; the user reviews and merges the change.
 
-Publishing needs push access. **DeepSeek: Set Zero Gallery Token** stores a GitHub token in VS Code's
-encrypted secret storage; it is used only for that push and is never logged. Without a token, git's
-own credential helper may still supply access. `deepseek.advance.galleryUrl` names the repository, so
-a fork can be used for testing.
+Publishing needs push access. **DeepSeek: Sign In to GitHub** uses VS Code's built-in GitHub
+authentication with the `repo` scope; the resulting session token is used only for that push and is
+never logged. **DeepSeek: Sign Out of GitHub** clears the session, as does the Accounts menu. The
+token never touches settings or the webview. Without a signed-in session, git's own credential
+helper may still supply access. `deepseek.advance.galleryUrl` names the repository, so a fork can be
+used for testing.
 
 **Tasks** is a queue of discrete jobs. **+ Add task** opens an inline form with a title and an
 optional description; each card shows both, its checkbox marks it done, and `x` removes it. **Next

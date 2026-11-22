@@ -94,7 +94,7 @@ export interface RouterOptions {
   galleryDir?: string;
   /** The gallery's git URL. */
   galleryUrl?: string;
-  /** A token for publishing; the router never logs it. */
+  /** A signed-in GitHub session token for publishing; the router never logs it. */
   githubToken?: string;
 }
 

@@ -18,7 +18,7 @@ export interface EngineOptions {
   galleryDir?: string;
   /** The gallery's git URL (the public repo, or a fork). */
   galleryUrl?: string;
-  /** A GitHub token used only for publishing a gallery tool. Never logged. */
+  /** The signed-in GitHub session token, used only for publishing a gallery tool. Never logged. */
   githubToken?: string;
   /** User-defined tools discovered in `toolsDir`. */
   customTools?: CustomToolDefinition[];

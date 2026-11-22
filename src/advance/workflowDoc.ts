@@ -231,7 +231,7 @@ export function parseSteps(body: string): WorkflowStep[] {
         const split = splitOnce(rest);
         if (split === undefined) {
           throw new Error(
-            `line ${number}: \`${word}\` needs a setting and a value — \`${word} githubToken {{token}}\``,
+            `line ${number}: \`${word}\` needs a setting and a value — \`${word} apiKey {{key}}\``,
           );
         }
         steps.push({ kind: "setting", key: split[0].trim(), value: split[1].trim() });

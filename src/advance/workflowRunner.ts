@@ -18,7 +18,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as vscode from "vscode";
 
-import { GITHUB_SECRET_KEY, SECRET_KEY } from "../consts";
+import { SECRET_KEY } from "../consts";
 import { advanceBridge } from "./advanceBridge";
 import { clip, firstProblem, killTree, launchFor } from "./commandLaunch";
 import { advanceSettings } from "./settings";
@@ -409,9 +409,9 @@ function planSteps(
         break;
       }
       case "setting": {
-        if (step.key !== "githubToken" && step.key !== "apiKey") {
+        if (step.key !== "apiKey") {
           return {
-            error: `\`${step.key}\` is not a setting a workflow may write (one of: githubToken, apiKey)`,
+            error: `\`${step.key}\` is not a setting a workflow may write (only: apiKey)`,
           };
         }
         const reference = singleReference(step.value);
@@ -568,10 +568,8 @@ async function execute(
         try {
           if (bridge !== undefined) {
             await bridge.storeSetting(step.key, step.value);
-          } else if (step.key === "apiKey") {
-            await context.secrets.store(SECRET_KEY, step.value);
           } else {
-            await context.secrets.store(GITHUB_SECRET_KEY, step.value);
+            await context.secrets.store(SECRET_KEY, step.value);
           }
           output.appendLine(`saved ${step.key}`);
         } catch (error) {

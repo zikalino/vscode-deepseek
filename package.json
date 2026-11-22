@@ -41,7 +41,8 @@
     "onCommand:deepseek.advance.showWorkflow",
     "onCommand:deepseek.advance.openWorkflowDocument",
     "onCommand:deepseek.advance.setApiKey",
-    "onCommand:deepseek.advance.setGithubToken",
+    "onCommand:deepseek.advance.githubSignIn",
+    "onCommand:deepseek.advance.githubSignOut",
     "onCommand:deepseek.advance.openSettings"
   ],
   "contributes": {
@@ -118,8 +119,13 @@
         "category": "DeepSeek"
       },
       {
-        "command": "deepseek.advance.setGithubToken",
-        "title": "Set Zero Gallery Token",
+        "command": "deepseek.advance.githubSignIn",
+        "title": "Sign In to GitHub",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.advance.githubSignOut",
+        "title": "Sign Out of GitHub",
         "category": "DeepSeek"
       },
       {
@@ -253,7 +259,10 @@
           "command": "deepseek.advance.setApiKey"
         },
         {
-          "command": "deepseek.advance.setGithubToken"
+          "command": "deepseek.advance.githubSignIn"
+        },
+        {
+          "command": "deepseek.advance.githubSignOut"
         },
         {
           "command": "deepseek.advance.openSettings"
