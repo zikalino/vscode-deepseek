@@ -66,7 +66,7 @@ async function chooseWorkflow(
   const workflows = discoverWorkflows(root.fsPath);
   if (workflows.length === 0) {
     void vscode.window.showInformationMessage(
-      "No workflows found. Add a .md document under .advance/workflows, or ask the Advance agent to create one.",
+      "No workflows found. Add a .md document under .advance/workflows, or ask the Zero agent to create one.",
     );
     return undefined;
   }

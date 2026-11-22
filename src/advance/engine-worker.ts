@@ -54,6 +54,8 @@ function emitLogs(scene: string): void {
       post({ type: "busy", busy: rest[0] === "1" });
     } else if (verb === "turn-done") {
       post({ type: "turnDone" });
+    } else if (verb === "toolEnabled" && rest.length >= 2) {
+      post({ type: "toolEnabled", name: rest[0], enabled: rest[1] === "1" });
     }
   }
 }
@@ -144,8 +146,15 @@ function sendInput(event: Record<string, unknown>): void {
 
 function start(): void {
   try {
+    // `tools` is the extension's global folder: a custom tool is written there by
+    // `create_custom_tool`, not into the project it happens to be used in. A host that did not
+    // supply one (a workflow tab) simply has no such root.
+    const roots = new Map<string, string>([["workspace", options.workspace]]);
+    if (options.toolsDir !== undefined) {
+      roots.set("tools", options.toolsDir);
+    }
     const router = new Router({
-      roots: new Map([["workspace", options.workspace]]),
+      roots,
       writable: options.allowWrite,
       allowedCommands: options.allowedCommands,
       commandTimeoutMs: options.commandTimeoutMs,
@@ -175,6 +184,15 @@ function start(): void {
         workspace: options.workspace,
         pricing: options.pricing,
       },
+    });
+    // The catalogue is the host's discovery plus the user's checkboxes. It goes in after `init` so
+    // the grant's built-ins and the user's tools are known together, and before the first frame so
+    // the Tools view never flashes a list the user did not choose.
+    guest.input({
+      op: "catalogue",
+      custom: options.customTools ?? [],
+      workflows: options.workflowTools ?? [],
+      enabled: options.enabledTools ?? {},
     });
     guest.input({ op: "bar", value: options.bar ?? true });
     guest.input({ op: "selectSurface", value: options.surface ?? "chat" });

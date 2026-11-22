@@ -12,6 +12,7 @@
 // `deepseek.advance.*`.
 
 import { randomBytes } from "node:crypto";
+import { mkdirSync } from "node:fs";
 import * as path from "node:path";
 import { Worker } from "node:worker_threads";
 import * as vscode from "vscode";
@@ -20,14 +21,19 @@ import { GITHUB_SECRET_KEY, SECRET_KEY } from "../consts";
 import { setAdvanceBridge, type AdvanceBridge } from "./advanceBridge";
 import type { EngineOptions, EngineRequest, EngineResponse } from "./protocol";
 import { advanceSettings, readApiKey, resolveHarnessWasm } from "./settings";
+import { discoverCustomTools } from "./customTools";
 import { isWorkflowDocumentId, readWorkflowDocument } from "./workflowFiles";
 import { runWorkflowDocument } from "./workflowRunner";
+import { discoverWorkflowCatalogue } from "./workflows";
 
 export { advanceSettings, readApiKey, resolveHarnessWasm } from "./settings";
 export type { AdvanceSettings } from "./settings";
 export { isWorkflowDocumentId, openWorkflowDocument } from "./workflowFiles";
 
 export const ADVANCE_VIEW_ID = "deepseek.advanceView";
+
+/** Where this workspace remembers which tools the user allowed. */
+const TOOL_ENABLED_KEY = "deepseek.advance.toolEnabled";
 
 function workspaceRoot(): vscode.Uri | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri;
@@ -62,6 +68,8 @@ class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
   private size: { width: number; height: number } | undefined;
   /** The workflow document whose form the panel is showing, when one is open. */
   private workflowId: string | undefined;
+  /** The workspace's allow/disable choices, kept in memory so two quick ticks cannot lose one. */
+  private enabledTools: Record<string, boolean> = {};
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -69,7 +77,7 @@ class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
     this.view = view;
     const media = vscode.Uri.joinPath(this.context.extensionUri, "media");
     view.webview.options = { enableScripts: true, localResourceRoots: [media] };
-    view.webview.html = panelHtml(view.webview, media, "DeepSeek Advance");
+    view.webview.html = panelHtml(view.webview, media, "DeepSeek Zero");
     view.webview.onDidReceiveMessage((message: unknown) => {
       void this.receive(message);
     });
@@ -259,15 +267,35 @@ class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
       return;
     }
     if (apiKey.length === 0) {
-      this.postStatus("No DeepSeek API key yet — run “DeepSeek: Set Advance API Key”.");
+      this.postStatus("No DeepSeek API key yet — run “DeepSeek: Set Zero API Key”.");
     }
 
     // A fresh engine replaces the whole conversation. Clear the old frame first: if the new engine
     // cannot start, the user sees an empty panel and the status, not the conversation they left.
     void this.view?.webview.postMessage({ type: "clear" });
+
+    // Custom tools are global to the extension, not to this project. The folder is created once so
+    // the harness's `/tools` root always has somewhere to write.
+    const toolsDir = vscode.Uri.joinPath(this.context.globalStorageUri, "tools");
+    try {
+      mkdirSync(toolsDir.fsPath, { recursive: true });
+    } catch {
+      // A read-only global-storage location just means no new tools can be created; the rest works.
+    }
+    this.enabledTools = {
+      ...(this.context.workspaceState.get<Record<string, boolean>>(TOOL_ENABLED_KEY) ?? {}),
+    };
+    const customTools = discoverCustomTools(toolsDir.fsPath);
+    const workflowCatalogue = discoverWorkflowCatalogue(root.fsPath, this.enabledTools);
+
     const options: EngineOptions = {
       wasmPath,
       workspace: root.fsPath,
+      toolsDir: toolsDir.fsPath,
+      customTools,
+      workflowTools: workflowCatalogue.tools,
+      enabledTools: this.enabledTools,
+      workflowItems: workflowCatalogue.items,
       apiUrl: config.apiUrl,
       apiKey,
       model: config.model,
@@ -358,6 +386,14 @@ class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
           this.pump();
         }
         return;
+      case "toolEnabled": {
+        // The harness owns the checkbox's immediate effect; this workspace owns the choice. A new
+        // tool is absent from the map, which is why "disabled until the user allows it" needs no
+        // second store. The in-memory map makes two quick ticks additive rather than last-wins.
+        this.enabledTools[message.name] = message.enabled;
+        await this.context.workspaceState.update(TOOL_ENABLED_KEY, this.enabledTools);
+        return;
+      }
       case "ready":
         this.ready = true;
         // The guest is live: hand it the theme the webview computed before it existed (or before
@@ -369,7 +405,7 @@ class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
         return;
       case "error":
         this.postStatus(message.message);
-        void vscode.window.showErrorMessage(`Advance: ${message.message}`);
+        void vscode.window.showErrorMessage(`Zero: ${message.message}`);
         return;
       default:
         return;
@@ -453,7 +489,7 @@ export function registerAdvancePanel(context: vscode.ExtensionContext): void {
     ),
     vscode.commands.registerCommand("deepseek.advance.setApiKey", async () => {
       const value = await vscode.window.showInputBox({
-        title: "DeepSeek API key for the Advance panel",
+        title: "DeepSeek API key for the Zero panel",
         prompt: "Stored in VS Code's encrypted secret storage. Leave empty to clear it.",
         password: true,
         ignoreFocusOut: true,

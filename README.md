@@ -5,17 +5,17 @@
 >
 > The **Copilot Integration** (using DeepSeek as a VS Code Language Model Chat Provider) is at **production level** and ready for daily use.
 >
-> The **Advance panel** is an experimental, self-contained agent harness. It is functional but may see breaking changes as it is refined.
+> The **Zero panel** is an experimental, self-contained agent harness. It is functional but may see breaking changes as it is refined.
 >
 > Feedback and contributions are welcome — they help shape the final features!
 
 ## Quick Start
 
-1. Set `deepseek.apiKey` in VS Code settings, or store the key in VS Code secret storage (the Advance panel's **Set Advance API Key** command uses the same secret).
+1. Set `deepseek.apiKey` in VS Code settings, or store the key in VS Code secret storage (the Zero panel's **Set Zero API Key** command uses the same secret).
 2. Open VS Code Chat (`Ctrl+Shift+I`) and pick **DeepSeek V4 Flash** or **DeepSeek V4 Pro** from the model dropdown.
 3. Start asking questions or requesting code changes — DeepSeek works just like Copilot.
 
-> The **Advance** activity-bar panel is described in [§2](#2-usage).
+> The **Zero** activity-bar panel is described in [§2](#2-usage).
 
 > For more updates, subscribe to [zikalino.substack.com](https://zikalino.substack.com).
 
@@ -35,7 +35,7 @@
 **SmarterCode DeepSeek** is a VS Code extension that brings DeepSeek's language models (V4 Flash & V4 Pro) directly into your editor. It goes beyond a simple chat wrapper by providing:
 
 - **Copilot integration** — Use DeepSeek as your default model in VS Code Chat. Ask questions, request code changes, search your codebase — all from `Ctrl+Shift+I`.
-- **Advance panel (WASM)** — A self-contained agent panel — conversation, tasks, tools, workflows and settings — with its agent loop shipped as `advance_harness.wasm`, and an Activity Bar icon of its own.
+- **Zero panel (WASM)** — A self-contained agent panel — conversation, tasks, tools, workflows and settings — with its agent loop shipped as `advance_harness.wasm`, and an Activity Bar icon of its own.
 - **Failure diagnostics** — Failed requests are dumped to `.smartercode/deepseek-failures/` and can be browsed from the command palette.
 
 ---
@@ -85,14 +85,14 @@ For deeper diagnostics, set `deepseek-copilot.debugMode` to `"verbose"`. To also
 
 ---
 
-### Advance Panel (WASM harness)
+### Zero Panel (WASM harness)
 
-The **Advance** icon in the Activity Bar opens a panel whose interface and agent loop are the
+The **Zero** icon in the Activity Bar opens a panel whose interface and agent loop are the
 bundled `advance_harness.wasm` module. The extension supplies the capabilities: the model endpoint and
 key, file access confined to the first workspace folder, and an allowlisted command runner.
 
-1. Click the **Advance** icon in the Activity Bar.
-2. Run **DeepSeek: Set Advance API Key** once. The key is stored in VS Code secret storage;
+1. Click the **Zero** icon in the Activity Bar.
+2. Run **DeepSeek: Set Zero API Key** once. The key is stored in VS Code secret storage;
    `DEEPSEEK_API_KEY` works as a fallback.
 3. Ask for a change. The panel reuses `deepseek.apiEndpoint` and `deepseek.model`.
 
@@ -100,7 +100,7 @@ The module runs on a worker thread, so a long build it starts cannot freeze the 
 and command execution are governed by `deepseek.advance.allowWrite` and
 `deepseek.advance.allowedCommands`; the allowlist is empty by default, which removes the shell tool
 entirely. The view's **+** button starts a fresh conversation; the key is set from the view's overflow
-menu (or **DeepSeek: Set Advance API Key**).
+menu (or **DeepSeek: Set Zero API Key**).
 
 The panel is multi-surface. The bar along its top switches between **Agent** (the conversation),
 **Tasks**, **Tools** (the calls the agent may make under the current grant), **Workflows** and
@@ -112,11 +112,54 @@ buttons. The module draws the form; the host only runs the script the form's **R
 **DeepSeek: Run Workflow...** and **DeepSeek: Show Workflow...** open the chosen workflow in a
 WASM-rendered tab showing that form. Filling the fields and pressing a script's **Run** runs that
 script's steps in order: commands in the workspace under `deepseek.advance.allowedCommands`, `write`
-steps under `deepseek.advance.allowWrite`, and `agent` steps as turns in the Advance chat. Progress and
+steps under `deepseek.advance.allowWrite`, and `agent` steps as turns in the Zero chat. Progress and
 output are in the **DeepSeek Workflows** output channel. If a command's program is not allowlisted, the
 prompt offers to add the missing programs and run; declining runs nothing.
 
 **DeepSeek: Open Workflow Document...** opens the source, where you can review or edit the steps.
+
+**Tools** is the surface that decides what the agent may call. It lists the built-in tools the grant
+allows, the custom tools from the extension's global tools folder, and the workspace's single-script
+workflows. Every row has a checkbox: built-in tools start allowed, while a custom tool or a workflow
+the agent creates starts **disabled** and stays off until the user ticks it. A ticked item runs its own
+`command`/`write` steps without a per-step allowlist or `allowWrite` prompt — the checkbox is the
+permission — while a `write` still cannot leave the workspace. Ticking a workflow whose one script is
+made of `command`/`write` steps also lets the agent call it as a tool, using the workflow's fields as
+its parameters; a workflow with several buttons, or with `agent`/`setting`/`task` steps, stays
+user-run.
+
+A **custom tool** is a document in the extension's global tools folder,
+`<globalStorage>/tools/*.md`, not in the current project. The agent writes one with
+`create_custom_tool`; it has no dialog, but it uses the same markdown-form directives as a workflow:
+`param` declares an argument, a `script` holds the steps, and `output` is what the model receives.
+
+```markdown
+---
+name: deploy
+title: Deploy
+description: Build and publish the project.
+---
+
+# Deploy
+
+<!-- param id=env label="Environment" type=string required values="stable,beta" -->
+
+<!-- output -->
+Deployed {{env}}.
+{{result}}
+<!-- end -->
+
+<!-- script id=run label="Run" -->
+cargo build --release
+write NOTES.md
+Built for {{env}}.
+end
+<!-- end -->
+```
+
+The script accepts `command` and `write` steps. `{{id}}` is an argument; in the output template
+`{{result}}` is everything the steps printed. The tool is listed in **Tools** as soon as it exists,
+but it is never sent to the model until its checkbox is ticked.
 
 **Tasks** is a queue of discrete jobs. **+ Add task** opens an inline form with a title and an
 optional description; each card shows both, its checkbox marks it done, and `x` removes it. **Next
@@ -144,7 +187,7 @@ All settings are under the `deepseek.*` and `deepseek-copilot.*` namespaces.
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `deepseek.apiKey` | string | `""` | DeepSeek API key. Prefer secret storage (for example via **DeepSeek: Set Advance API Key**). |
+| `deepseek.apiKey` | string | `""` | DeepSeek API key. Prefer secret storage (for example via **DeepSeek: Set Zero API Key**). |
 | `deepseek.apiEndpoint` | string | `https://api.deepseek.com/chat/completions` | API endpoint override. |
 | `deepseek.model` | string | `"deepseek-v4-flash"` | Model name to use. |
 
@@ -155,14 +198,14 @@ All settings are under the `deepseek.*` and `deepseek-copilot.*` namespaces.
 | `deepseek-copilot.debugMode` | `"minimal"` \| `"metadata"` \| `"verbose"` | `"minimal"` | Controls request diagnostics and dump file generation. |
 | `deepseek-copilot.dumpRequests` | boolean | `false` | Also write raw Copilot/DeepSeek request and response payloads to the workspace `.dump/` folder (several MB per turn; retention keeps roughly the newest 100 files of each kind). |
 
-### Advance Panel Settings (`deepseek.advance.*`)
+### Zero Panel Settings (`deepseek.advance.*`)
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `deepseek.advance.harnessWasm` | string | `""` | Path to `advance_harness.wasm`. Empty uses the bundled copy, then a workspace `target/wasm32-unknown-unknown/{release,debug}` build. |
-| `deepseek.advance.allowWrite` | boolean | `true` | Let the Advance agent create, edit, move and delete files in the first workspace folder. |
-| `deepseek.advance.allowedCommands` | string[] | `[]` | Programs the shell tool may run. Empty removes the shell tool entirely. |
-| `deepseek.advance.commandTimeoutSeconds` | number (1–3600) | `120` | How long an Advance command may run before it is killed. |
+| `deepseek.advance.allowWrite` | boolean | `true` | Let the Zero agent's built-in file tools create, edit, move and delete files in the first workspace folder. A custom tool or workflow the user has allowed runs its own `write` steps regardless; those writes stay inside the workspace. |
+| `deepseek.advance.allowedCommands` | string[] | `[]` | Programs the built-in shell tool may run. Empty removes the shell tool entirely. A custom tool or workflow the user has allowed runs its own `command` steps regardless. |
+| `deepseek.advance.commandTimeoutSeconds` | number (1–3600) | `120` | How long a Zero command may run before it is killed. |
 | `deepseek.advance.pricing.*` | number | `0` | Dollars per million tokens for the panel's cost divider (zero hides the figures). |
 
 ### Internal Copilot Settings (advanced)
@@ -185,13 +228,13 @@ Commands marked with 🔍 are accessible from the **F1 command palette**.
 | Command ID | Title | Description |
 |-----------|-------|-------------|
 | 🔍 `deepseek.showLogs` | DeepSeek: Browse Failed Requests | Browse the failed-request dumps in `.smartercode/deepseek-failures/`. |
-| 🔍 `deepseek.advance.newChat` | DeepSeek: New Advance Chat | Start a fresh conversation in the Advance panel. |
-| 🔍 `deepseek.advance.abort` | DeepSeek: Stop the Advance Turn | Cancel the current Advance turn. |
+| 🔍 `deepseek.advance.newChat` | DeepSeek: New Zero Chat | Start a fresh conversation in the Zero panel. |
+| 🔍 `deepseek.advance.abort` | DeepSeek: Stop the Zero Turn | Cancel the current Zero turn. |
 | 🔍 `deepseek.advance.runWorkflow` | DeepSeek: Run Workflow... | List the workspace's workflows and open the chosen one's WASM form; its Run starts the script. |
 | 🔍 `deepseek.advance.showWorkflow` | DeepSeek: Show Workflow... | Open the chosen workflow's WASM form in a tab. |
 | 🔍 `deepseek.advance.openWorkflowDocument` | DeepSeek: Open Workflow Document... | Open the chosen workflow's markdown source to review or edit. |
-| 🔍 `deepseek.advance.setApiKey` | DeepSeek: Set Advance API Key | Store or clear the API key used by the Advance panel. |
-| 🔍 `deepseek.advance.openSettings` | DeepSeek: Configure Advance | Open the `deepseek.advance.*` settings in VS Code. |
+| 🔍 `deepseek.advance.setApiKey` | DeepSeek: Set Zero API Key | Store or clear the API key used by the Zero panel. |
+| 🔍 `deepseek.advance.openSettings` | DeepSeek: Configure Zero | Open the `deepseek.advance.*` settings in VS Code. |
 
 ---
 
@@ -212,11 +255,11 @@ extension.ts (activate)
 
 1. **Copilot-native provider** — DeepSeek is registered as a `LanguageModelChatProvider`, so the model picker, tools, and chat UI stay in VS Code. `client/core.ts` is the HTTP/streaming boundary; the `provider/` helpers handle conversion, debugging, replay, tool limits, and vision proxying.
 
-2. **WASM-isolated Advance agent** — The Advance panel's UI and agent loop are the bundled `advance_harness.wasm`. It runs on a worker thread so long commands cannot block the editor, and the host supplies only the capabilities defined in `advance/protocol.ts`.
+2. **WASM-isolated Zero agent** — The Zero panel's UI and agent loop are the bundled `advance_harness.wasm`. It runs on a worker thread so long commands cannot block the editor, and the host supplies only the capabilities defined in `advance/protocol.ts`.
 
 3. **Failure dumps, not a request log** — Every failed request is written to `.smartercode/deepseek-failures/` with its exact request and response bodies. The failure browser reads those dumps, and only the newest 50 are retained.
 
-4. **One configuration surface** — Copilot and Advance both read `deepseek.apiEndpoint` and `deepseek.model`, and both resolve the key from secret storage or the `deepseek.apiKey` setting.
+4. **One configuration surface** — Copilot and Zero both read `deepseek.apiEndpoint` and `deepseek.model`, and both resolve the key from secret storage or the `deepseek.apiKey` setting.
 
 ---
 
@@ -254,7 +297,7 @@ After install, reload VS Code:
 ```
 vscode-deepseek/
 ├── src/
-│   ├── extension.ts           # Activation: Copilot provider, Advance panel, failure browser
+│   ├── extension.ts           # Activation: Copilot provider, Zero panel, failure browser
 │   ├── auth.ts                # API key management via SecretStorage
 │   ├── consts.ts              # Constants & model definitions
 │   ├── types.ts               # TypeScript types
@@ -263,7 +306,9 @@ vscode-deepseek/
 │   ├── copilot.ts             # Registers the LanguageModelChatProvider
 │   ├── deepseekFailures.ts    # Writes failed-request dumps
 │   ├── deepseekLogBrowser.ts  # Webview for browsing failure dumps
-│   ├── advance/               # WASM harness host + Advance panel provider
+│   ├── advance/               # WASM harness host + Zero panel provider
+│   │   ├── customTools.ts     # Global tools folder discovery/parsing
+│   │   ├── toolCatalogue.ts   # Tool-definition wire types + name sanitising
 │   ├── client/
 │   │   ├── core.ts            # Copilot provider HTTP client
 │   │   └── error.ts           # Error handling utilities
@@ -276,7 +321,7 @@ vscode-deepseek/
 │       ├── tools/             # Tool stabilization & limits
 │       └── vision/            # Vision proxy for image input
 ├── vendor/                    # Materialized common-webviews (failure browser)
-├── media/                     # Advance panel canvas, styles, and WASM harness
+├── media/                     # Zero panel canvas, styles, and WASM harness
 ├── imgs/                      # Extension icons
 ├── scripts/                   # Build scripts
 ├── package.json

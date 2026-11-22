@@ -24,12 +24,10 @@ import { clip, firstProblem, killTree, launchFor } from "./commandLaunch";
 import { advanceSettings } from "./settings";
 import { isWorkflowDocumentId, openWorkflowDocument } from "./workflowFiles";
 import {
-  bareName,
   fill,
   firstUnknown,
   parseSteps,
   parseWorkflow,
-  programAllowed,
   singleReference,
   splitCommand,
   type WorkflowField,
@@ -44,9 +42,7 @@ type PlannedStep =
   | { kind: "setting"; key: string; value: string }
   | { kind: "task"; title: string; description: string; prompt: string };
 
-type PlanResult =
-  | { planned: PlannedStep[] }
-  | { error: string; missing?: string[] };
+type PlanResult = { planned: PlannedStep[] } | { error: string };
 
 interface ExecutionOutcome {
   ok: boolean;
@@ -172,42 +168,14 @@ async function run(
     return;
   }
 
-  let planned: PlannedStep[] | undefined;
-  for (;;) {
-    const config = advanceSettings();
-    const plan = planSteps(steps, values, root.fsPath, config.allowedCommands, config.allowWrite);
-    if ("planned" in plan) {
-      planned = plan.planned;
-      break;
-    }
-    if (plan.missing !== undefined && plan.missing.length > 0) {
-      const choice = await vscode.window.showWarningMessage(
-        `Workflow "${parsed.title}" needs programs that are not allowlisted: ${plan.missing.join(", ")}.`,
-        { modal: true },
-        "Add and Run",
-        "Cancel",
-      );
-      if (choice === "Add and Run") {
-        try {
-          await addAllowedCommands(plan.missing);
-          continue;
-        } catch (error) {
-          await fail(
-            output,
-            `could not update deepseek.advance.allowedCommands: ${message(error)}`,
-            root,
-            relative,
-          );
-          return;
-        }
-      }
-    }
+  // No per-step allowlist or write-permission preflight: an allowed workflow is allowed. What
+  // remains is the workspace boundary — a `write` step still cannot name a path outside the folder.
+  const plan = planSteps(steps, values, root.fsPath);
+  if (!("planned" in plan)) {
     await fail(output, `Workflow "${parsed.title}": ${plan.error}`, root, relative);
     return;
   }
-  if (planned === undefined) {
-    return;
-  }
+  const planned = plan.planned;
 
   const config = advanceSettings();
   output.appendLine(`Running ${planned.length} step${planned.length === 1 ? "" : "s"}...`);
@@ -248,7 +216,7 @@ async function run(
   const agentContinues = planned.some((step) => step.kind === "agent" || step.kind === "task");
   const choice = await vscode.window.showInformationMessage(
     agentContinues
-      ? `Workflow "${parsed.title}" finished; the agent continues in the Advance panel.`
+      ? `Workflow "${parsed.title}" finished; the agent continues in the Zero panel.`
       : `Workflow "${parsed.title}" finished.`,
     "Show Output",
   );
@@ -370,21 +338,19 @@ function isShown(when: string, values: ReadonlyMap<string, string>): boolean {
 }
 
 /**
- * Decide every step before anything runs. A workflow whose third step names a program that is not
- * allowlisted runs nothing at all, rather than two steps and a surprise.
+ * Decide every step before anything runs. An allowed workflow is allowed: the program's name is
+ * not checked against a list, and a write is not checked against `allowWrite`. The workspace
+ * boundary still holds — a `write` path that leaves the folder is a refusal, not a normalisation.
  */
 function planSteps(
   steps: WorkflowStep[],
   values: ReadonlyMap<string, string>,
   root: string,
-  allowed: readonly string[],
-  allowWrite: boolean,
 ): PlanResult {
   if (steps.length === 0) {
     return { error: "this workflow has no steps — write them inside the `script` directive" };
   }
   const planned: PlannedStep[] = [];
-  const missing = new Set<string>();
 
   for (const step of steps) {
     switch (step.kind) {
@@ -407,16 +373,6 @@ function planSteps(
         const [program, ...args] = tokens;
         if (program.length === 0) {
           return { error: `\`${filled}\`: there is no program to run` };
-        }
-        // A path is not a name, and adding it to the allowlist could never make it match. Refusing
-        // here also keeps "Add and Run" from prompting forever.
-        if (program.includes("/") || program.includes("\\") || /^[A-Za-z]:/.test(program)) {
-          return {
-            error: `\`${program}\` is a path; a workflow runs programs by name, not by path`,
-          };
-        }
-        if (!programAllowed(program, allowed)) {
-          missing.add(program);
         }
         planned.push({ kind: "command", program, args, line: filled });
         break;
@@ -443,11 +399,6 @@ function planSteps(
           };
         }
         const shown = fill(step.path, values);
-        if (!allowWrite) {
-          return {
-            error: `writing \`${shown}\` needs write access — enable deepseek.advance.allowWrite`,
-          };
-        }
         let target: string;
         try {
           target = inside(root, shown);
@@ -504,14 +455,6 @@ function planSteps(
     }
   }
 
-  if (missing.size > 0) {
-    return {
-      error:
-        `these programs are not allowlisted: ${[...missing].join(", ")} — ` +
-        "add them to deepseek.advance.allowedCommands to run them",
-      missing: [...missing],
-    };
-  }
   return { planned };
 }
 
@@ -611,7 +554,7 @@ async function execute(
         progress.report({ message: `agent: ${clip(step.text.replace(/\s+/g, " "), 80)}` });
         const bridge = advanceBridge();
         if (bridge === undefined) {
-          const problem = "no Advance panel is available to receive the prompt";
+          const problem = "no Zero panel is available to receive the prompt";
           output.appendLine(`  ${problem}`);
           return { ok: false, cancelled: false, error: problem };
         }
@@ -642,7 +585,7 @@ async function execute(
         progress.report({ message: `queuing ${step.title}` });
         const bridge = advanceBridge();
         if (bridge === undefined) {
-          const problem = "no Advance panel is available to queue the task";
+          const problem = "no Zero panel is available to queue the task";
           output.appendLine(`  ${problem}`);
           return { ok: false, cancelled: false, error: problem };
         }
@@ -743,19 +686,6 @@ function runCommand(
       });
     });
   });
-}
-
-/** Add the missing programs so the next plan can run them. The user has just said yes, in a modal. */
-async function addAllowedCommands(programs: string[]): Promise<void> {
-  const configuration = vscode.workspace.getConfiguration("deepseek.advance");
-  const current = configuration.get<string[]>("allowedCommands", []);
-  const merged = [...current];
-  for (const program of programs) {
-    if (!merged.some((candidate) => bareName(candidate) === bareName(program))) {
-      merged.push(program);
-    }
-  }
-  await configuration.update("allowedCommands", merged, vscode.ConfigurationTarget.Workspace);
 }
 
 function message(error: unknown): string {

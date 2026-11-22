@@ -3,6 +3,7 @@
 // Kept in its own module so both sides can import the types without pulling in the worker's
 // top-level code (importing `engine-worker` outside a worker thread throws by design).
 
+import type { CustomToolDefinition } from "./toolCatalogue";
 import type { WorkflowBrief } from "./workflows";
 
 /** Everything the worker needs, handed over as `workerData`. */
@@ -11,6 +12,14 @@ export interface EngineOptions {
   wasmPath: string;
   /** The folder `/workspace` maps to. */
   workspace: string;
+  /** The global tools folder `/tools` maps to. Custom tools live here, outside any project. */
+  toolsDir?: string;
+  /** User-defined tools discovered in `toolsDir`. */
+  customTools?: CustomToolDefinition[];
+  /** Single-script workflows the host exposes as model tools. */
+  workflowTools?: CustomToolDefinition[];
+  /** Tool name -> allowed. Built-ins default on; user-defined tools default off. */
+  enabledTools?: Record<string, boolean>;
   /** The full chat-completions URL. */
   apiUrl: string;
   /** The provider token (in-process only; never sent to the webview). */
@@ -65,6 +74,8 @@ export type EngineResponse =
   | { type: "busy"; busy: boolean }
   /** The harness's `turn-done`, which also arrives when a turn could not start at all. */
   | { type: "turnDone" }
+  /** A tool's checkbox was pressed; the host owns the persisted choice. */
+  | { type: "toolEnabled"; name: string; enabled: boolean }
   /**
    * A workflow form's `script` button was pressed. The host owns the executor, so it runs the
    * script with these answers.

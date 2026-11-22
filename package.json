@@ -1,7 +1,7 @@
 {
   "name": "vscode-deepseek-obsidian",
   "version": "0.0.48",
-  "description": "DeepSeek-powered coding assistant for VS Code with Copilot integration and an autonomous Advance panel.",
+  "description": "DeepSeek-powered coding assistant for VS Code with Copilot integration and an autonomous Zero panel.",
   "license": "ISC",
   "author": "",
   "icon": "imgs/logo.png",
@@ -54,8 +54,8 @@
       "activitybar": [
         {
           "id": "deepseek-advance",
-          "title": "Advance",
-          "icon": "media/advance.svg"
+          "title": "Zero",
+          "icon": "media/zero.svg"
         }
       ]
     },
@@ -63,7 +63,7 @@
       "deepseek-advance": [
         {
           "id": "deepseek.advanceView",
-          "name": "Advance",
+          "name": "Zero",
           "type": "webview"
         }
       ]
@@ -83,13 +83,13 @@
       },
       {
         "command": "deepseek.advance.newChat",
-        "title": "New Advance Chat",
+        "title": "New Zero Chat",
         "category": "DeepSeek",
         "icon": "$(add)"
       },
       {
         "command": "deepseek.advance.abort",
-        "title": "Stop the Advance Turn",
+        "title": "Stop the Zero Turn",
         "category": "DeepSeek",
         "icon": "$(debug-stop)"
       },
@@ -113,12 +113,12 @@
       },
       {
         "command": "deepseek.advance.setApiKey",
-        "title": "Set Advance API Key",
+        "title": "Set Zero API Key",
         "category": "DeepSeek"
       },
       {
         "command": "deepseek.advance.openSettings",
-        "title": "Configure Advance",
+        "title": "Configure Zero",
         "category": "DeepSeek",
         "icon": "$(gear)"
       }
@@ -164,7 +164,7 @@
         "deepseek.advance.allowWrite": {
           "type": "boolean",
           "default": true,
-          "description": "Let the Advance agent create, edit, move and delete files in the first workspace folder."
+          "description": "Let the Zero agent create, edit, move and delete files in the first workspace folder."
         },
         "deepseek.advance.allowedCommands": {
           "type": "array",
@@ -172,19 +172,19 @@
             "type": "string"
           },
           "default": [],
-          "description": "Programs the Advance agent may run. Empty removes the shell tool entirely."
+          "description": "Programs the Zero agent may run. Empty removes the shell tool entirely."
         },
         "deepseek.advance.commandTimeoutSeconds": {
           "type": "number",
           "default": 120,
           "minimum": 1,
           "maximum": 3600,
-          "description": "How long an Advance command may run before it is killed."
+          "description": "How long a Zero command may run before it is killed."
         },
         "deepseek.advance.pricing.inputPerMillion": {
           "type": "number",
           "default": 0,
-          "description": "Dollars per million uncached input tokens, for the Advance panel's cost divider. Zero hides the figures."
+          "description": "Dollars per million uncached input tokens, for the Zero panel's cost divider. Zero hides the figures."
         },
         "deepseek.advance.pricing.cachedPerMillion": {
           "type": "number",

@@ -43,6 +43,7 @@ import { VirtualPath } from "./vpath";
 export const METHOD = {
   FS_READ_FILE: "fs/readFile",
   FS_WRITE_FILE: "fs/writeFile",
+  FS_WRITE_FILE_GRANTED: "fs/writeFileGranted",
   FS_LIST: "fs/list",
   FS_STAT: "fs/stat",
   FS_MKDIR: "fs/mkdir",
@@ -50,6 +51,7 @@ export const METHOD = {
   FS_RENAME: "fs/rename",
   FS_TOUCH: "fs/touch",
   PROCESS_SPAWN: "process/spawn",
+  PROCESS_SPAWN_GRANTED: "process/spawnGranted",
   PROCESS_READ_STDOUT: "process/readStdout",
   PROCESS_KILL: "process/kill",
   PROCESS_WRITE_STDIN: "process/writeStdin",
@@ -123,7 +125,11 @@ export class Router {
       case METHOD.FS_READ_FILE:
         return this.readFile(payload);
       case METHOD.FS_WRITE_FILE:
-        return this.writeFile(payload);
+        return this.writeFile(payload, false);
+      case METHOD.FS_WRITE_FILE_GRANTED:
+        // An enabled user tool's write: the Tools view is the permission, not `allowWrite`. Paths
+        // still go through `VirtualPath`, so `/workspace` and `/tools` remain the only roots.
+        return this.writeFile(payload, true);
       case METHOD.FS_LIST:
         return { entries: this.list(payload) };
       case METHOD.FS_STAT:
@@ -137,7 +143,11 @@ export class Router {
       case METHOD.FS_TOUCH:
         return this.touch(payload);
       case METHOD.PROCESS_SPAWN:
-        return this.spawn(payload);
+        return this.spawn(payload, false);
+      case METHOD.PROCESS_SPAWN_GRANTED:
+        // An enabled user tool's command: the checkbox is the permission, not the allowlist. The
+        // working directory is still confined to `/workspace`, and the timeout still applies.
+        return this.spawn(payload, true);
       case METHOD.PROCESS_READ_STDOUT:
         return this.readStdout(payload);
       case METHOD.PROCESS_KILL:
@@ -181,8 +191,10 @@ export class Router {
     return { data: encodeBase64(slice), encoding: "base64", size: bytes.length };
   }
 
-  private writeFile(payload: unknown): unknown {
-    this.requireWritable();
+  private writeFile(payload: unknown, granted: boolean): unknown {
+    if (!granted) {
+      this.requireWritable();
+    }
     const virtual = this.virtual(stringField(payload, "path"));
     if (virtual.isRoot) {
       throw new AbiError("invalid_path", "a root is not a file");
@@ -323,9 +335,9 @@ export class Router {
 
   // ---- Process -----------------------------------------------------------------------------
 
-  private spawn(payload: unknown): unknown {
+  private spawn(payload: unknown, granted: boolean): unknown {
     const program = stringField(payload, "program");
-    if (!this.options.allowedCommands.includes(program)) {
+    if (!granted && !this.options.allowedCommands.includes(program)) {
       throw new AbiError(
         "not_permitted",
         `\`${program}\` is not in the command allowlist (deepseek.advance.allowedCommands)`,
