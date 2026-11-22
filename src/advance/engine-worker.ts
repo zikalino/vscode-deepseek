@@ -122,8 +122,9 @@ function start(): void {
       netClose: (handle) => pumps.close(handle),
     });
 
-    // Hand the engine its provider exactly once, then open the chat view. Clipboard stays ungranted:
-    // a worker thread has no clipboard access, so the engine must not advertise those tools.
+    // Hand the engine its provider exactly once, then open the surface the host asked for. The
+    // default is the conversation with the module's own bar, which is what the Advance panel wants;
+    // a workflow tab asks for `workflows` with no bar, so the one card is the whole tab.
     guest.input({
       op: "init",
       provider: {
@@ -138,13 +139,14 @@ function start(): void {
         pricing: options.pricing,
       },
     });
-    // The panel is multi-surface: the module draws its own top bar (Agent, Tasks, Tools, Workflows
-    // and Settings). The host adds no navigation of its own, so the component has to keep its bar on
-    // and start on the conversation.
-    guest.input({ op: "bar", value: true });
-    guest.input({ op: "selectSurface", value: "chat" });
-    // The harness cannot list `.advance/workflows`; discovery is the host's.
-    guest.input({ op: "workflows", items: discoverWorkflows(options.workspace) });
+    guest.input({ op: "bar", value: options.bar ?? true });
+    guest.input({ op: "selectSurface", value: options.surface ?? "chat" });
+    // The harness cannot list `.advance/workflows`; discovery is the host's. A workflow tab hands
+    // over the document it was opened for instead of the whole folder.
+    guest.input({
+      op: "workflows",
+      items: options.workflowItems ?? discoverWorkflows(options.workspace),
+    });
     // This engine's webview (media/panel.js) turns a spinner on its own clock, so the module hands
     // it one instead of drawing dots that would freeze whenever a tool call blocks this thread.
     guest.input({ op: "hostSpins", value: true });

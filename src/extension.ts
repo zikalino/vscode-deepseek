@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { registerCopilotFeatures } from './copilot';
 import { registerAdvancePanel } from './advance/panel';
+import { registerWorkflowCommand } from './advance/workflowTabs';
 import { registerLogBrowserCommand } from './deepseekLogBrowser';
 
 // ─── Activation ─────────────────────────────────────────────────
@@ -13,6 +14,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
     registerCopilotFeatures(context, log);
     registerAdvancePanel(context);
+    registerWorkflowCommand(context);
     registerLogBrowserCommand(context, log, 'deepseek.showLogs');
   } catch (err) {
     vscode.window.showErrorMessage(`DeepSeek extension activation failed: ${String(err)}`);

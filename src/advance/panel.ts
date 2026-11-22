@@ -22,7 +22,7 @@ import type { EngineOptions, EngineRequest, EngineResponse } from "./protocol";
 
 export const ADVANCE_VIEW_ID = "deepseek.advanceView";
 
-interface Settings {
+export interface AdvanceSettings {
   apiUrl: string;
   model: string;
   allowedCommands: string[];
@@ -34,7 +34,7 @@ interface Settings {
 
 const DEFAULT_ENDPOINT = "https://api.deepseek.com/chat/completions";
 
-function settings(): Settings {
+export function advanceSettings(): AdvanceSettings {
   const config = vscode.workspace.getConfiguration("deepseek");
   const advance = vscode.workspace.getConfiguration("deepseek.advance");
   const seconds = advance.get<number>("commandTimeoutSeconds", 120);
@@ -69,6 +69,76 @@ function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** The stored key, else the configured key, else the environment. */
+export async function readApiKey(context: vscode.ExtensionContext): Promise<string> {
+  const stored = await context.secrets.get(SECRET_KEY);
+  if (stored !== undefined && stored.length > 0) {
+    return stored;
+  }
+  const configured = vscode.workspace.getConfiguration("deepseek").get<string>("apiKey", "");
+  if (configured.length > 0) {
+    return configured;
+  }
+  return process.env.DEEPSEEK_API_KEY ?? "";
+}
+
+/**
+ * Find the harness artifact: the explicit setting, a copy shipped beside the panel, or the build
+ * output of a Cargo workspace at the folder (or one level above it, for this repo's layout).
+ */
+export function resolveHarnessWasm(workspace: string, extensionPath: string): string | undefined {
+  const explicit = vscode.workspace
+    .getConfiguration("deepseek.advance")
+    .get<string>("harnessWasm", "")
+    .trim();
+  if (explicit.length > 0) {
+    return existsSync(explicit) ? explicit : undefined;
+  }
+  const candidates: string[] = [path.join(extensionPath, "media", "advance_harness.wasm")];
+  const bases = new Set<string>([
+    workspace,
+    path.join(workspace, "advance"),
+    path.dirname(workspace),
+    path.join(path.dirname(workspace), "advance"),
+  ]);
+  for (const profile of ["release", "debug"]) {
+    for (const base of bases) {
+      candidates.push(
+        path.join(base, "target", "wasm32-unknown-unknown", profile, "advance_harness.wasm"),
+      );
+    }
+  }
+  return candidates.find((candidate) => existsSync(candidate));
+}
+
+/** Whether a card's id names a document under the workspace's workflow folder. */
+export function isWorkflowDocumentId(id: string): boolean {
+  const relative = id.trim().replace(/\\/g, "/");
+  return relative.startsWith(".advance/workflows/") && relative.toLowerCase().endsWith(".md");
+}
+
+/**
+ * Open a workflow card's document in a preview tab. Returns the failure to report, or `undefined`
+ * when the document opened.
+ */
+export async function openWorkflowDocument(
+  root: vscode.Uri,
+  id: string,
+): Promise<string | undefined> {
+  const relative = id.trim().replace(/\\/g, "/");
+  if (!isWorkflowDocumentId(relative)) {
+    return "it is not a workflow document";
+  }
+  const target = vscode.Uri.joinPath(root, ...relative.split("/"));
+  try {
+    const document = await vscode.workspace.openTextDocument(target);
+    await vscode.window.showTextDocument(document, { preview: true });
+    return undefined;
+  } catch (error) {
+    return describe(error);
+  }
+}
+
 /** The panel. */
 class Panel implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
@@ -85,7 +155,7 @@ class Panel implements vscode.WebviewViewProvider {
     this.view = view;
     const media = vscode.Uri.joinPath(this.context.extensionUri, "media");
     view.webview.options = { enableScripts: true, localResourceRoots: [media] };
-    view.webview.html = this.html(view.webview, media);
+    view.webview.html = panelHtml(view.webview, media, "DeepSeek Advance");
     view.webview.onDidReceiveMessage((message: unknown) => {
       void this.receive(message);
     });
@@ -179,7 +249,7 @@ class Panel implements vscode.WebviewViewProvider {
       this.postStatus("Open a folder first: the tools are confined to the first workspace folder.");
       return;
     }
-    const wasmPath = this.resolveWasm(root.fsPath);
+    const wasmPath = resolveHarnessWasm(root.fsPath, this.context.extensionPath);
     if (wasmPath === undefined) {
       this.postStatus(
         "advance_harness.wasm not found — build it with " +
@@ -187,8 +257,8 @@ class Panel implements vscode.WebviewViewProvider {
       );
       return;
     }
-    const config = settings();
-    const apiKey = await this.apiKey();
+    const config = advanceSettings();
+    const apiKey = await readApiKey(this.context);
     if (apiKey.length === 0) {
       this.postStatus("No DeepSeek API key yet — run “DeepSeek: Set Advance API Key”.");
     }
@@ -269,93 +339,51 @@ class Panel implements vscode.WebviewViewProvider {
    */
   private async openWorkflow(id: string): Promise<void> {
     const root = workspaceRoot();
-    const relative = id.trim().replace(/\\/g, "/");
     // Only a document under the workflow folder: the id is what the harness built the card from,
     // and a card that names anything else has no file to open.
-    if (
-      root === undefined ||
-      !relative.startsWith(".advance/workflows/") ||
-      !relative.toLowerCase().endsWith(".md")
-    ) {
+    if (root === undefined || !isWorkflowDocumentId(id)) {
       return;
     }
-    const target = vscode.Uri.joinPath(root, ...relative.split("/"));
-    try {
-      const document = await vscode.workspace.openTextDocument(target);
-      await vscode.window.showTextDocument(document, { preview: true });
-    } catch (error) {
-      this.postStatus(`could not open ${relative}: ${describe(error)}`);
+    const problem = await openWorkflowDocument(root, id);
+    if (problem !== undefined) {
+      this.postStatus(`could not open ${id}: ${problem}`);
     }
   }
+}
 
-  /** The stored key, else the configured key, else the environment. */
-  private async apiKey(): Promise<string> {
-    const stored = await this.context.secrets.get(SECRET_KEY);
-    if (stored !== undefined && stored.length > 0) {
-      return stored;
-    }
-    const configured = vscode.workspace.getConfiguration("deepseek").get<string>("apiKey", "");
-    if (configured.length > 0) {
-      return configured;
-    }
-    return process.env.DEEPSEEK_API_KEY ?? "";
-  }
-
-  /**
-   * Find the harness artifact: the explicit setting, a copy shipped beside the panel, or the build
-   * output of a Cargo workspace at the folder (or one level above it, for this repo's layout).
-   */
-  private resolveWasm(workspace: string): string | undefined {
-    const explicit = vscode.workspace
-      .getConfiguration("deepseek.advance")
-      .get<string>("harnessWasm", "")
-      .trim();
-    if (explicit.length > 0) {
-      return existsSync(explicit) ? explicit : undefined;
-    }
-    const candidates: string[] = [
-      path.join(this.context.extensionPath, "media", "advance_harness.wasm"),
-    ];
-    const bases = new Set<string>([
-      workspace,
-      path.join(workspace, "advance"),
-      path.dirname(workspace),
-      path.join(path.dirname(workspace), "advance"),
-    ]);
-    for (const profile of ["release", "debug"]) {
-      for (const base of bases) {
-        candidates.push(
-          path.join(base, "target", "wasm32-unknown-unknown", profile, "advance_harness.wasm"),
-        );
-      }
-    }
-    return candidates.find((candidate) => existsSync(candidate));
-  }
-
-  private html(webview: vscode.Webview, media: vscode.Uri): string {
-    const nonce = randomBytes(16).toString("base64");
-    const style = webview.asWebviewUri(vscode.Uri.joinPath(media, "panel.css"));
-    const theme = webview.asWebviewUri(vscode.Uri.joinPath(media, "theme.js"));
-    const script = webview.asWebviewUri(vscode.Uri.joinPath(media, "panel.js"));
-    return `<!DOCTYPE html>
+/** The canvas page every Advance webview hosts; only the title differs. */
+export function panelHtml(webview: vscode.Webview, media: vscode.Uri, title: string): string {
+  const nonce = randomBytes(16).toString("base64");
+  const style = webview.asWebviewUri(vscode.Uri.joinPath(media, "panel.css"));
+  const theme = webview.asWebviewUri(vscode.Uri.joinPath(media, "theme.js"));
+  const script = webview.asWebviewUri(vscode.Uri.joinPath(media, "panel.js"));
+  const label = escapeHtml(title);
+  return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
 <link rel="stylesheet" href="${style}">
-<title>DeepSeek Advance</title>
+<title>${label}</title>
 </head>
 <body>
 <div id="app">
-  <canvas id="screen" tabindex="0" aria-label="Advance"></canvas>
+  <canvas id="screen" tabindex="0" aria-label="${label}"></canvas>
   <span id="status" role="status"></span>
 </div>
 <script nonce="${nonce}" src="${theme}"></script>
 <script nonce="${nonce}" src="${script}"></script>
 </body>
 </html>`;
-  }
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 /** Register the Advance panel, its commands, and its configuration listener. */

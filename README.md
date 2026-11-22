@@ -107,6 +107,11 @@ The panel is multi-surface. The bar along its top switches between **Agent** (th
 **Settings**. Settings is a destination in that bar rather than a separate button beside it. Workflows
 are the documents in `.advance/workflows/*.md`, and pressing a card opens its document in the editor.
 
+**DeepSeek: Run Workflow...** lists those documents and opens the one you pick in a new editor tab.
+The tab is a second host of the same WASM module, told to draw its **Workflows** surface with just that
+workflow, so the card is rendered by the module rather than by the editor's DOM. Its **Run** pill opens
+the workflow's document, where you can review or edit the steps.
+
 **Tasks** is a queue of discrete jobs. **+ Add task** opens an inline form with a title and an
 optional description; each card shows both, its checkbox marks it done, and `x` removes it. **Next
 Task** runs the first task that is neither done nor blocked, and **Auto Execute** keeps starting the
@@ -176,6 +181,7 @@ Commands marked with 🔍 are accessible from the **F1 command palette**.
 | 🔍 `deepseek.showLogs` | DeepSeek: Browse Failed Requests | Browse the failed-request dumps in `.smartercode/deepseek-failures/`. |
 | 🔍 `deepseek.advance.newChat` | DeepSeek: New Advance Chat | Start a fresh conversation in the Advance panel. |
 | 🔍 `deepseek.advance.abort` | DeepSeek: Stop the Advance Turn | Cancel the current Advance turn. |
+| 🔍 `deepseek.advance.runWorkflow` | DeepSeek: Run Workflow... | List the workspace's workflows and open the chosen one in a WASM-rendered tab. |
 | 🔍 `deepseek.advance.setApiKey` | DeepSeek: Set Advance API Key | Store or clear the API key used by the Advance panel. |
 | 🔍 `deepseek.advance.openSettings` | DeepSeek: Configure Advance | Open the `deepseek.advance.*` settings in VS Code. |
 

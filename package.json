@@ -37,6 +37,7 @@
     "onCommand:deepseek.showLogs",
     "onCommand:deepseek.advance.newChat",
     "onCommand:deepseek.advance.abort",
+    "onCommand:deepseek.advance.runWorkflow",
     "onCommand:deepseek.advance.setApiKey",
     "onCommand:deepseek.advance.openSettings"
   ],
@@ -89,6 +90,12 @@
         "title": "Stop the Advance Turn",
         "category": "DeepSeek",
         "icon": "$(debug-stop)"
+      },
+      {
+        "command": "deepseek.advance.runWorkflow",
+        "title": "Run Workflow...",
+        "category": "DeepSeek",
+        "icon": "$(play)"
       },
       {
         "command": "deepseek.advance.setApiKey",
@@ -202,6 +209,9 @@
         },
         {
           "command": "deepseek.advance.abort"
+        },
+        {
+          "command": "deepseek.advance.runWorkflow"
         },
         {
           "command": "deepseek.advance.setApiKey"

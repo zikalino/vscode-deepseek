@@ -3,6 +3,8 @@
 // Kept in its own module so both sides can import the types without pulling in the worker's
 // top-level code (importing `engine-worker` outside a worker thread throws by design).
 
+import type { WorkflowBrief } from "./workflows";
+
 /** Everything the worker needs, handed over as `workerData`. */
 export interface EngineOptions {
   /** The harness artifact to instantiate. */
@@ -28,6 +30,18 @@ export interface EngineOptions {
    */
   width?: number;
   height?: number;
+  /**
+   * The surface the module should draw once it is live. The Advance panel leaves this unset (the
+   * chat); a workflow tab asks for `workflows` so the same module paints the workflow card.
+   */
+  surface?: "chat" | "tasks" | "tools" | "workflows" | "settings";
+  /** Whether the module draws its own surface bar. A single-surface tab turns it off. */
+  bar?: boolean;
+  /**
+   * The workflow list the module should draw. Unset means "discover `.advance/workflows`"; a
+   * workflow tab passes the one document the user picked.
+   */
+  workflowItems?: WorkflowBrief[];
 }
 
 /** Messages the extension host sends to the worker. */
