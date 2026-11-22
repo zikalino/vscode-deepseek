@@ -18,6 +18,14 @@ import { writeFailureDump } from '../deepseekFailures';
 const ACCUMULATED_CONTENT_CAP = 4_000_000;
 
 /**
+ * DeepSeek requires `reasoning_content` on every previous assistant turn when the
+ * request carries `tools`. Host-synthesized tool turns (e.g. an automatic terminal
+ * read) and turns where thinking was disabled have none, so a marker is sent in
+ * their place instead of letting the API reject the whole request.
+ */
+const MISSING_REASONING_CONTENT = '(no reasoning recorded for this turn)';
+
+/**
  * Zero-dependency SSE streaming client for DeepSeek Chat Completions API.
  * Uses Node.js built-in fetch.
  */
@@ -73,16 +81,19 @@ export class DeepSeekClient {
           `responseBody=${bodyText || '<empty>'}`,
         );
         const err = httpError(response.status, bodyText);
-        writeFailureDump({
-          source: 'copilot',
-          model: request.model,
-          url,
-          status: response.status,
-          statusText: response.statusText,
-          error: err.userMessage,
-          requestBody,
-          responseBody: bodyText,
-        });
+        writeFailureDump(
+          {
+            source: 'copilot',
+            model: request.model,
+            url,
+            status: response.status,
+            statusText: response.statusText,
+            error: err.userMessage,
+            requestBody,
+            responseBody: bodyText,
+          },
+          this.log,
+        );
         failureDumped = true;
         callbacks.onError(new Error(err.userMessage));
         return;
@@ -90,16 +101,19 @@ export class DeepSeekClient {
 
       const reader = response.body?.getReader();
       if (!reader) {
-        writeFailureDump({
-          source: 'copilot',
-          model: request.model,
-          url,
-          status: response.status,
-          statusText: response.statusText,
-          error: 'Response body has no readable stream.',
-          requestBody,
-          responseBody: '',
-        });
+        writeFailureDump(
+          {
+            source: 'copilot',
+            model: request.model,
+            url,
+            status: response.status,
+            statusText: response.statusText,
+            error: 'Response body has no readable stream.',
+            requestBody,
+            responseBody: '',
+          },
+          this.log,
+        );
         failureDumped = true;
         callbacks.onError(new Error('Response body has no readable stream.'));
         return;
@@ -194,14 +208,17 @@ export class DeepSeekClient {
         ? networkError(err as Error & { code?: string })
         : unknownError(err);
       if (!failureDumped) {
-        writeFailureDump({
-          source: 'copilot',
-          model: request.model,
-          url,
-          error: result.userMessage,
-          requestBody,
-          responseBody: '',
-        });
+        writeFailureDump(
+          {
+            source: 'copilot',
+            model: request.model,
+            url,
+            error: result.userMessage,
+            requestBody,
+            responseBody: '',
+          },
+          this.log,
+        );
       }
       callbacks.onError(new Error(result.userMessage));
     }
@@ -224,9 +241,10 @@ function formatPayloadForLog(payload: Record<string, unknown>, truncate: boolean
 }
 
 function normalizeRequestForApi(request: DeepSeekRequest): Record<string, unknown> {
+  const hasTools = Array.isArray(request.tools) && request.tools.length > 0;
   const normalized: Record<string, unknown> = {
     model: request.model,
-    messages: normalizeMessages(request.messages),
+    messages: normalizeMessages(request.messages, hasTools),
     stream: true,
   };
 
@@ -242,7 +260,7 @@ function normalizeRequestForApi(request: DeepSeekRequest): Record<string, unknow
     normalized.temperature = request.temperature;
   }
 
-  if (Array.isArray(request.tools) && request.tools.length > 0) {
+  if (hasTools) {
     normalized.tools = request.tools;
     normalized.tool_choice = request.tool_choice ?? 'auto';
   }
@@ -269,7 +287,10 @@ function normalizeBaseUrl(baseUrl: string): string {
   return trimmed;
 }
 
-function normalizeMessages(messages: DeepSeekRequest['messages']): Record<string, unknown>[] {
+function normalizeMessages(
+  messages: DeepSeekRequest['messages'],
+  requireReasoningContent: boolean,
+): Record<string, unknown>[] {
   const normalized: Record<string, unknown>[] = [];
   const declaredToolCallIds = new Set<string>();
 
@@ -327,6 +348,8 @@ function normalizeMessages(messages: DeepSeekRequest['messages']): Record<string
       // previous assistant turns; dropping it yields "Request body format error".
       if (typeof message.reasoning_content === 'string' && message.reasoning_content.length > 0) {
         msg.reasoning_content = message.reasoning_content;
+      } else if (requireReasoningContent) {
+        msg.reasoning_content = MISSING_REASONING_CONTENT;
       }
 
       if (!Array.isArray(msg.tool_calls) && content.trim().length === 0) {
@@ -341,7 +364,42 @@ function normalizeMessages(messages: DeepSeekRequest['messages']): Record<string
     normalized.push(msg);
   }
 
-  return normalized;
+  return pruneUnansweredToolCalls(normalized, declaredToolCallIds);
+}
+
+/**
+ * Drop tool calls that never received a result. DeepSeek requires every tool call
+ * on an assistant message to be answered; leaving one unanswered (a cancelled or
+ * lost tool result) is another "Request body format error".
+ */
+function pruneUnansweredToolCalls(
+  messages: Record<string, unknown>[],
+  unanswered: Set<string>,
+): Record<string, unknown>[] {
+  if (unanswered.size === 0) {
+    return messages;
+  }
+
+  const pruned: Record<string, unknown>[] = [];
+  for (const message of messages) {
+    if (message.role === 'assistant' && Array.isArray(message.tool_calls)) {
+      const kept = (message.tool_calls as DeepSeekToolCall[]).filter((call) => !unanswered.has(call.id));
+      if (kept.length !== message.tool_calls.length) {
+        if (kept.length === 0) {
+          const content = typeof message.content === 'string' ? message.content : '';
+          if (content.trim().length === 0) {
+            continue;
+          }
+          delete message.tool_calls;
+        } else {
+          message.tool_calls = kept;
+        }
+      }
+    }
+    pruned.push(message);
+  }
+
+  return pruned;
 }
 
 function processChunk(

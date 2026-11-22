@@ -76,6 +76,8 @@ export type EngineResponse =
   | { type: "status"; message: string }
   | { type: "ready" }
   | { type: "openWorkflow"; path: string }
+  /** A tool's row was pressed: the host opens the markdown behind a custom or workflow tool. */
+  | { type: "openTool"; kind: string; name: string }
   /** The harness's `busy\t1`/`busy\t0`, so the host can hand it one prompt at a time. */
   | { type: "busy"; busy: boolean }
   /** The harness's `turn-done`, which also arrives when a turn could not start at all. */

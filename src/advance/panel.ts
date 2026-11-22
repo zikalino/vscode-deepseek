@@ -21,11 +21,11 @@ import { GITHUB_SECRET_KEY, SECRET_KEY } from "../consts";
 import { setAdvanceBridge, type AdvanceBridge } from "./advanceBridge";
 import type { EngineOptions, EngineRequest, EngineResponse } from "./protocol";
 import { advanceSettings, readApiKey, resolveHarnessWasm } from "./settings";
-import { discoverCustomTools } from "./customTools";
+import { discoverCustomTools, findCustomToolDocument } from "./customTools";
 import { ensureGallery, GALLERY_DIR_NAME } from "./galleryRepo";
 import { isWorkflowDocumentId, readWorkflowDocument } from "./workflowFiles";
 import { runWorkflowDocument } from "./workflowRunner";
-import { discoverWorkflowCatalogue } from "./workflows";
+import { discoverWorkflowCatalogue, findWorkflowToolDocument } from "./workflows";
 
 export { advanceSettings, readApiKey, resolveHarnessWasm } from "./settings";
 export type { AdvanceSettings } from "./settings";
@@ -361,6 +361,9 @@ class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
       case "openWorkflow":
         await this.openWorkflow(message.path);
         return;
+      case "openTool":
+        await this.openTool(message.kind, message.name);
+        return;
       case "workflowRun": {
         const id = this.workflowId;
         const root = workspaceRoot();
@@ -451,6 +454,38 @@ class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
       type: "input",
       event: { op: "workflowForm", title: document.title, source: document.source },
     });
+  }
+
+  /**
+   * A tool's row was pressed: open the markdown that defines it in a new editor tab.
+   *
+   * Only custom tools and workflow tools have a document; the harness does not make a built-in
+   * row a target. A name that no longer resolves (the file was deleted after the engine started)
+   * is reported in the panel instead of opening nothing.
+   */
+  private async openTool(kind: string, name: string): Promise<void> {
+    const root = workspaceRoot();
+    if (root === undefined) {
+      return;
+    }
+    const toolsDir = vscode.Uri.joinPath(this.context.globalStorageUri, "tools");
+    const file =
+      kind === "workflow"
+        ? findWorkflowToolDocument(root.fsPath, name)
+        : findCustomToolDocument(toolsDir.fsPath, name);
+    if (file === undefined) {
+      this.postStatus(`could not find the document for ${name}`);
+      return;
+    }
+    try {
+      const document = await vscode.workspace.openTextDocument(vscode.Uri.file(file));
+      await vscode.window.showTextDocument(document, {
+        preview: false,
+        viewColumn: vscode.ViewColumn.Active,
+      });
+    } catch (error) {
+      this.postStatus(`could not open ${name}: ${describe(error)}`);
+    }
   }
 }
 

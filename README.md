@@ -73,7 +73,7 @@ The extension logs all DeepSeek API activity to the **DeepSeek** output channel,
 
 **Failed requests:**
 
-A request that fails — an HTTP error such as 502, or a network error — is written as one JSON file to `.smartercode/deepseek-failures/` in the workspace. Each dump carries the status, the error, and the exact request and response bodies. The newest 50 dumps are kept, and `.smartercode/` is git-ignored.
+A request that fails — an HTTP error such as 502, or a network error — is written as one JSON file to `.smartercode/deepseek-failures/` in the workspace. Each dump carries the status, the error, and the exact request and response bodies. The newest 50 dumps are kept, and `.smartercode/` is git-ignored. When no workspace folder is open, dumps go to the system temp directory's `deepseek-failures` folder instead of being dropped.
 
 Run **DeepSeek: Browse Failed Requests** from the command palette to list them. Selecting a row opens the request body, the response body, or the full dump.
 
@@ -126,7 +126,9 @@ the agent creates starts **disabled** and stays off until the user ticks it. A t
 permission — while a `write` still cannot leave the workspace. Ticking a workflow whose one script is
 made of `command`/`write` steps also lets the agent call it as a tool, using the workflow's fields as
 its parameters; a workflow with several buttons, or with `agent`/`setting`/`task` steps, stays
-user-run.
+user-run. Pressing a custom tool's or workflow tool's row — the row itself, not its checkbox — opens
+the markdown document that defines it in a new editor tab. A built-in tool has no document of its
+own, so its row is not a target.
 
 A **custom tool** is a document in the extension's global tools folder, not in the current project.
 A tool the agent creates is `<globalStorage>/tools/<name>.md`; a tool installed from the gallery is

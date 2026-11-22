@@ -43,6 +43,8 @@ function emitLogs(scene: string): void {
     const [verb, ...rest] = line.split("\t");
     if (verb === "openWorkflow" && rest.length > 0) {
       post({ type: "openWorkflow", path: rest.join("\t") });
+    } else if (verb === "openTool" && rest.length >= 2) {
+      post({ type: "openTool", kind: rest[0], name: rest.slice(1).join("\t") });
     } else if (verb === "workflowRun" && rest.length > 0) {
       const run = parseRun(rest.join("\t"));
       if (run !== undefined) {

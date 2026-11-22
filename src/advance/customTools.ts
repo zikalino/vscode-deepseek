@@ -25,6 +25,55 @@ import {
  * `<id>/tool.md` (supporting files may sit beside it). Both are the same document to the harness.
  */
 export function discoverCustomTools(directory: string): CustomToolDefinition[] {
+  const tools: CustomToolDefinition[] = [];
+  const seen = new Set<string>();
+  for (const { file, fallback } of toolDocuments(directory)) {
+    let source: string;
+    try {
+      source = readFileSync(file, "utf8");
+    } catch {
+      continue;
+    }
+    const tool = parseCustomTool(source, fallback);
+    if (tool === undefined || seen.has(tool.name)) {
+      continue;
+    }
+    seen.add(tool.name);
+    tools.push(tool);
+  }
+  return tools;
+}
+
+/**
+ * The markdown document that defines `name`, or `undefined` when the folder has no such tool.
+ *
+ * Discovery keeps the first of two documents with the same name, so the first match here is the
+ * document the harness was given and the Tools view is describing.
+ */
+export function findCustomToolDocument(directory: string, name: string): string | undefined {
+  for (const { file, fallback } of toolDocuments(directory)) {
+    let source: string;
+    try {
+      source = readFileSync(file, "utf8");
+    } catch {
+      continue;
+    }
+    if (parseCustomTool(source, fallback)?.name === name) {
+      return file;
+    }
+  }
+  return undefined;
+}
+
+interface ToolDocument {
+  /** The markdown file itself. */
+  file: string;
+  /** The name to fall back to when the document gives none. */
+  fallback: string;
+}
+
+/** The markdown documents in a tools folder, in name order, as discovery lists them. */
+function toolDocuments(directory: string): ToolDocument[] {
   let entries: Dirent[];
   try {
     entries = readdirSync(directory, { withFileTypes: true });
@@ -32,8 +81,7 @@ export function discoverCustomTools(directory: string): CustomToolDefinition[] {
     return [];
   }
   entries.sort((a, b) => a.name.localeCompare(b.name));
-  const tools: CustomToolDefinition[] = [];
-  const seen = new Set<string>();
+  const documents: ToolDocument[] = [];
   for (const entry of entries) {
     let file: string | undefined;
     let fallback: string;
@@ -52,23 +100,11 @@ export function discoverCustomTools(directory: string): CustomToolDefinition[] {
     } else {
       continue;
     }
-    if (file === undefined) {
-      continue;
+    if (file !== undefined) {
+      documents.push({ file, fallback });
     }
-    let source: string;
-    try {
-      source = readFileSync(file, "utf8");
-    } catch {
-      continue;
-    }
-    const tool = parseCustomTool(source, fallback);
-    if (tool === undefined || seen.has(tool.name)) {
-      continue;
-    }
-    seen.add(tool.name);
-    tools.push(tool);
   }
-  return tools;
+  return documents;
 }
 
 /** Parse one custom-tool document. `undefined` when it has no callable steps. */

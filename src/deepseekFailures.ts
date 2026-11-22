@@ -1,11 +1,12 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 
 /** Which client path produced the failure. */
 export type FailureSource = 'copilot' | 'api';
 
-/** One failed request, as written to `.smartercode/deepseek-failures/`. */
+/** One failed request, as written to `.smartercode/deepseek-failures/` (or the temp fallback). */
 export interface FailureDump {
   /** ISO-8601 time the dump was written. */
   timestamp: string;
@@ -37,13 +38,24 @@ const MAX_FAILURE_FILES = 50;
 /** Makes two dumps written in the same millisecond distinct. */
 let sequence = 0;
 
-/** The directory where failed requests are dumped. */
+/** A logger whose warnings report a dump that could not be written. */
+export interface FailureLogger {
+  warn(...args: unknown[]): void;
+}
+
+/**
+ * The directory where failed requests are dumped.
+ *
+ * Dumps normally live in the workspace so they are easy to inspect next to the
+ * project. A provider hosted without a workspace folder (for example a window
+ * opened on a single file) falls back to the system temp directory instead of
+ * silently dropping them.
+ */
 export function getFailuresDir(create = true): string {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!root) {
-    throw new Error('No workspace folder open.');
-  }
-  const dir = path.join(root, '.smartercode', 'deepseek-failures');
+  const dir = root
+    ? path.join(root, '.smartercode', 'deepseek-failures')
+    : path.join(os.tmpdir(), 'deepseek-failures');
   if (create) {
     fs.mkdirSync(dir, { recursive: true });
   }
@@ -93,9 +105,11 @@ function pruneFailures(dir: string): void {
  *
  * Failures are rare, so this is unconditional: there is no setting to turn it on. Writing is
  * best-effort and never throws, because a diagnostic must not break the turn it is describing.
+ * When a logger is supplied, a dump that cannot be written is reported instead of vanishing.
  */
 export function writeFailureDump(
   failure: Omit<FailureDump, 'timestamp' | 'requestSizeBytes' | 'responseSizeBytes'>,
+  log?: FailureLogger,
 ): void {
   try {
     const dir = getFailuresDir();
@@ -111,7 +125,8 @@ export function writeFailureDump(
     };
     fs.writeFileSync(path.join(dir, filename), JSON.stringify(stored, null, 2), 'utf8');
     pruneFailures(dir);
-  } catch {
-    // A diagnostic is never worth throwing for.
+  } catch (error) {
+    // A diagnostic is never worth throwing for, but a silently lost diagnostic is useless.
+    log?.warn('Failed to write DeepSeek failure dump:', error);
   }
 }

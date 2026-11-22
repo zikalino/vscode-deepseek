@@ -134,6 +134,41 @@ function agentToolFor(
   };
 }
 
+/**
+ * The workflow document behind a workflow tool, or `undefined` when none of the workspace's
+ * documents defines `toolName`.
+ *
+ * The harness names the tool from the document it was given, so this walks the same documents and
+ * compares the same sanitised name; the row the user pressed and the file opened cannot disagree.
+ */
+export function findWorkflowToolDocument(
+  workspace: string,
+  toolName: string,
+): string | undefined {
+  const directory = path.join(workspace, ".advance", "workflows");
+  let names: string[];
+  try {
+    names = readdirSync(directory).filter((name) => name.toLowerCase().endsWith(".md"));
+  } catch {
+    return undefined;
+  }
+  names.sort();
+  for (const name of names) {
+    const file = path.join(directory, name);
+    let text: string;
+    try {
+      text = readFileSync(file, "utf8");
+    } catch {
+      continue;
+    }
+    const tool = agentToolFor(text, name.replace(/\.md$/i, ""), "");
+    if (tool?.name === toolName) {
+      return file;
+    }
+  }
+  return undefined;
+}
+
 /** What a card shows: the name the document gives itself, what it does, and how many steps. */
 function summarize(
   name: string,
