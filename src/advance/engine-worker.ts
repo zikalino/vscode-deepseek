@@ -141,6 +141,9 @@ function sendInput(event: Record<string, unknown>): void {
   if (typeof effects.status === "string" && effects.status.length > 0) {
     post({ type: "status", message: effects.status });
   }
+  if (effects.cursor !== undefined) {
+    post({ type: "cursor", cursor: effects.cursor });
+  }
   if (effects.repaint === true) {
     render();
   }
@@ -200,6 +203,9 @@ function start(): void {
       enabled: options.enabledTools ?? {},
     });
     guest.input({ op: "bar", value: options.bar ?? true });
+    // VS Code draws the view's own title bar, so the module must not draw a second header inside
+    // the canvas. A host without one (the desktop shell) leaves this unset and keeps the title.
+    guest.input({ op: "hostHeader", value: true });
     guest.input({ op: "selectSurface", value: options.surface ?? "chat" });
     // The harness cannot list `.advance/workflows`; discovery is the host's. A workflow tab hands
     // over the document it was opened for instead of the whole folder.

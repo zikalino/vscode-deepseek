@@ -11,6 +11,8 @@
 
 import { readFileSync } from "node:fs";
 
+import type { PointerCursor } from "./protocol";
+
 /** What the guest's imports reach for. */
 export interface Capabilities {
   /** `advance.host_call`: a request envelope in, the reply envelope array out. */
@@ -27,6 +29,8 @@ export interface Capabilities {
 export interface Effects {
   repaint?: boolean;
   status?: string | null;
+  /** Set when the input was pointer movement: the shape the pointer should take. */
+  cursor?: PointerCursor;
 }
 
 interface Exports {

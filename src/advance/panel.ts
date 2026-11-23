@@ -358,6 +358,7 @@ class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
   private async onEngine(message: EngineResponse): Promise<void> {
     switch (message.type) {
       case "scene":
+      case "cursor":
         void this.view?.webview.postMessage(message);
         return;
       case "status":

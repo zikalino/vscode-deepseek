@@ -333,6 +333,11 @@
           syncSpinner();
         }
         return;
+      case "cursor":
+        if (message.cursor === "default" || message.cursor === "pointer" || message.cursor === "text") {
+          canvas.style.cursor = message.cursor;
+        }
+        return;
       case "status":
         status.textContent = message.message ?? "";
         return;

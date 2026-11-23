@@ -70,9 +70,16 @@ export type EngineRequest =
   | { type: "resize"; width: number; height: number }
   | { type: "stop" };
 
+/**
+ * What the pointer should look like over the panel. The module reports it because only the module
+ * knows which rectangle it drew as a button or a text field.
+ */
+export type PointerCursor = "default" | "pointer" | "text";
+
 /** Messages the worker sends back. */
 export type EngineResponse =
   | { type: "scene"; scene: string }
+  | { type: "cursor"; cursor: PointerCursor }
   | { type: "status"; message: string }
   | { type: "ready" }
   | { type: "openWorkflow"; path: string }
