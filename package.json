@@ -44,7 +44,6 @@
     "onCommand:deepseek.advance.runWorkflow",
     "onCommand:deepseek.advance.showWorkflow",
     "onCommand:deepseek.advance.openWorkflowDocument",
-    "onCommand:deepseek.advance.setApiKey",
     "onCommand:deepseek.advance.githubSignIn",
     "onCommand:deepseek.advance.githubSignOut",
     "onCommand:deepseek.advance.openSettings"
@@ -77,7 +76,8 @@
     "commands": [
       {
         "command": "deepseek.setApiKey",
-        "title": "DeepSeek: Set API Key"
+        "title": "DeepSeek: Set API Key",
+        "icon": "$(key)"
       },
       {
         "command": "deepseek.clearApiKey",
@@ -133,14 +133,10 @@
         "icon": "$(go-to-file)"
       },
       {
-        "command": "deepseek.advance.setApiKey",
-        "title": "Set Zero API Key",
-        "category": "DeepSeek"
-      },
-      {
         "command": "deepseek.advance.githubSignIn",
         "title": "Sign In to GitHub",
-        "category": "DeepSeek"
+        "category": "DeepSeek",
+        "icon": "$(github)"
       },
       {
         "command": "deepseek.advance.githubSignOut",
@@ -252,14 +248,19 @@
           "group": "navigation@1"
         },
         {
-          "command": "deepseek.advance.setApiKey",
+          "command": "deepseek.advance.githubSignIn",
           "when": "view == deepseek.advanceView",
           "group": "navigation@2"
         },
         {
-          "command": "deepseek.advance.openWorkflowDocument",
+          "command": "deepseek.setApiKey",
           "when": "view == deepseek.advanceView",
           "group": "navigation@3"
+        },
+        {
+          "command": "deepseek.advance.openWorkflowDocument",
+          "when": "view == deepseek.advanceView",
+          "group": "navigation@4"
         }
       ],
       "commandPalette": [
@@ -292,9 +293,6 @@
         },
         {
           "command": "deepseek.advance.openWorkflowDocument"
-        },
-        {
-          "command": "deepseek.advance.setApiKey"
         },
         {
           "command": "deepseek.advance.githubSignIn"

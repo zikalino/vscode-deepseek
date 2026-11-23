@@ -550,9 +550,21 @@ export function registerAdvancePanel(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("deepseek.advance.githubSignIn", async () => {
       const existing = await github.getIdentity();
       if (existing !== undefined) {
-        void vscode.window.showInformationMessage(
-          `GitHub: already signed in as ${existing.label}.`,
+        const choice = await vscode.window.showInformationMessage(
+          `GitHub: signed in as ${existing.label}. Do you want to sign out?`,
+          { modal: true },
+          "Sign Out",
         );
+        if (choice === "Sign Out") {
+          if (!(await github.signOut())) {
+            void vscode.window.showWarningMessage(
+              `GitHub: ${existing.label} is still signed in. Use the Accounts menu to sign out.`,
+            );
+            return;
+          }
+          void vscode.window.showInformationMessage(`GitHub: signed out ${existing.label}.`);
+          panel.scheduleRestart();
+        }
         return;
       }
       const session = await github.signIn();
@@ -588,27 +600,12 @@ export function registerAdvancePanel(context: vscode.ExtensionContext): void {
     github.onDidChangeSessions(() => panel.scheduleRestart()),
     // A hosted session changes the endpoint and key the next engine start uses.
     accountManager(context).onDidChange(() => panel.scheduleRestart()),
-    vscode.commands.registerCommand("deepseek.advance.setApiKey", async () => {
-      const value = await vscode.window.showInputBox({
-        title: "DeepSeek API key for the Zero panel",
-        prompt: "Stored in VS Code's encrypted secret storage. Leave empty to clear it.",
-        password: true,
-        ignoreFocusOut: true,
-      });
-      if (value === undefined) {
-        return;
+    // The key is set by `deepseek.setApiKey` (the shared flow). Whichever path wrote it — that
+    // command, a workflow `setting` step, or a clear — the engine must start with the new value.
+    context.secrets.onDidChange((event) => {
+      if (event.key === SECRET_KEY) {
+        panel.scheduleRestart();
       }
-      const trimmed = value.trim();
-      if (trimmed.length === 0) {
-        await context.secrets.delete(SECRET_KEY);
-      } else {
-        await context.secrets.store(SECRET_KEY, trimmed);
-      }
-      void vscode.window.showInformationMessage(
-        trimmed.length > 0 ? "DeepSeek: API key saved." : "DeepSeek: API key cleared.",
-      );
-      // The key is handed to the engine at startup, so pick it up now.
-      await panel.restart();
     }),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration("deepseek")) {

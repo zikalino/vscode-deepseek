@@ -11,7 +11,7 @@
 
 ## Quick Start
 
-1. Set `deepseek.apiKey` in VS Code settings, or store the key in VS Code secret storage (the Zero panel's **Set Zero API Key** command uses the same secret). Alternatively, run **DeepSeek: Sign In for Free Tokens** to use the hosted monthly allowance described in [§2](#2-usage) — no DeepSeek key needed.
+1. Set `deepseek.apiKey` in VS Code settings, or store the key in VS Code secret storage (the Zero panel's **DeepSeek: Set API Key** command uses the same secret). Alternatively, run **DeepSeek: Sign In for Free Tokens** to use the hosted monthly allowance described in [§2](#2-usage) — no DeepSeek key needed.
 2. Open VS Code Chat (`Ctrl+Shift+I`) and pick **DeepSeek V4 Flash** or **DeepSeek V4 Pro** from the model dropdown.
 3. Start asking questions or requesting code changes — DeepSeek works just like Copilot.
 
@@ -109,15 +109,18 @@ bundled `advance_harness.wasm` module. The extension supplies the capabilities: 
 key, file access confined to the first workspace folder, and an allowlisted command runner.
 
 1. Click the **Zero** icon in the Activity Bar.
-2. Run **DeepSeek: Set Zero API Key** once. The key is stored in VS Code secret storage;
-   `DEEPSEEK_API_KEY` works as a fallback.
+2. Click the **key** icon in the view's title bar (or run **DeepSeek: Set API Key**) once.
+   The key is stored in VS Code secret storage; `DEEPSEEK_API_KEY` works as a fallback. If a key is
+   already stored, the dialog pre-fills it (masked) so it can be replaced, and submitting an empty
+   value clears it.
 3. Ask for a change. The panel reuses `deepseek.apiEndpoint` and `deepseek.model`.
 
 The module runs on a worker thread, so a long build it starts cannot freeze the editor. File writes
 and command execution are governed by `deepseek.advance.allowWrite` and
 `deepseek.advance.allowedCommands`; the allowlist is empty by default, which removes the shell tool
-entirely. The view's **+** button starts a fresh conversation; the key is set from the view's overflow
-menu (or **DeepSeek: Set Zero API Key**).
+entirely. The title bar's **+** starts a fresh conversation, the **GitHub** icon signs in to GitHub
+with VS Code's authentication provider (and, when already signed in, asks whether to sign out), and
+the **key** icon runs the shared **DeepSeek: Set API Key** flow.
 
 The panel is multi-surface. The bar along its top switches between **Agent** (the conversation),
 **Tasks**, **Tools** (the calls the agent may make under the current grant), **Workflows** and
@@ -227,7 +230,7 @@ All settings are under the `deepseek.*` and `deepseek-copilot.*` namespaces.
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `deepseek.apiKey` | string | `""` | DeepSeek API key. Prefer secret storage (for example via **DeepSeek: Set Zero API Key**). |
+| `deepseek.apiKey` | string | `""` | DeepSeek API key. Prefer secret storage (for example via **DeepSeek: Set API Key**). |
 | `deepseek.apiEndpoint` | string | `https://api.deepseek.com/chat/completions` | API endpoint override. |
 | `deepseek.model` | string | `"deepseek-v4-flash"` | Model name to use. |
 
@@ -277,13 +280,16 @@ Commands marked with 🔍 are accessible from the **F1 command palette**.
 
 | Command ID | Title | Description |
 |-----------|-------|-------------|
+| 🔍 `deepseek.setApiKey` | DeepSeek: Set API Key | Store or replace the DeepSeek API key shared by the Zero panel and the Copilot provider; the dialog pre-fills an existing key, and an empty value clears it. |
+| 🔍 `deepseek.clearApiKey` | DeepSeek: Clear API Key | Remove the stored DeepSeek API key. |
 | 🔍 `deepseek.showLogs` | DeepSeek: Browse Failed Requests | Browse the failed-request dumps in `.smartercode/deepseek-failures/`. |
 | 🔍 `deepseek.advance.newChat` | DeepSeek: New Zero Chat | Start a fresh conversation in the Zero panel. |
 | 🔍 `deepseek.advance.abort` | DeepSeek: Stop the Zero Turn | Cancel the current Zero turn. |
 | 🔍 `deepseek.advance.runWorkflow` | DeepSeek: Run Workflow... | List the workspace's workflows and open the chosen one's WASM form; its Run starts the script. |
 | 🔍 `deepseek.advance.showWorkflow` | DeepSeek: Show Workflow... | Open the chosen workflow's WASM form in a tab. |
 | 🔍 `deepseek.advance.openWorkflowDocument` | DeepSeek: Open Workflow Document... | Open the chosen workflow's markdown source to review or edit. |
-| 🔍 `deepseek.advance.setApiKey` | DeepSeek: Set Zero API Key | Store or clear the API key used by the Zero panel. |
+| 🔍 `deepseek.advance.githubSignIn` | DeepSeek: Sign In to GitHub | Sign in with VS Code's GitHub authentication provider; if already signed in, asks whether to sign out. |
+| 🔍 `deepseek.advance.githubSignOut` | DeepSeek: Sign Out of GitHub | Forget the GitHub session. |
 | 🔍 `deepseek.advance.openSettings` | DeepSeek: Configure Zero | Open the `deepseek.advance.*` settings in VS Code. |
 | 🔍 `deepseek.account.signIn` | DeepSeek: Sign In for Free Tokens | GitHub device-flow sign-in; unlocks the hosted monthly allowance. |
 | 🔍 `deepseek.account.showUsage` | DeepSeek: Show Token Allowance | Show the tier, tokens used and reset date for the signed-in account. |

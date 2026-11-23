@@ -16,6 +16,37 @@ function formatError(error: unknown): string {
  * so the DeepSeek models appear in the chat model picker.
  */
 export function registerCopilotFeatures(context: vscode.ExtensionContext, log: vscode.OutputChannel): void {
+  const dsLogger = new Logger('DeepSeek Copilot');
+  const authManager = new AuthManager(context.secrets, dsLogger);
+
+  // The public key commands. The Zero panel's key button runs the same flow, so there is one prompt
+  // and one secret behind both. Registered before the provider check: a build without the
+  // LanguageModelChatProvider API still needs a way to set the key.
+  context.subscriptions.push(
+    vscode.commands.registerCommand('deepseek.setApiKey', async () => {
+      const key = await authManager.promptForApiKey();
+      if (key === undefined) {
+        return;
+      }
+      if (key.length > 0) {
+        void vscode.window.showInformationMessage('DeepSeek: API key saved.');
+        return;
+      }
+      // Clearing removes the secret; the settings fallback may still hold a key, so say so rather
+      // than claiming the key is gone when the next request would still find one.
+      const remaining = await authManager.getApiKey();
+      void vscode.window.showInformationMessage(
+        remaining !== undefined
+          ? 'DeepSeek: stored key cleared, but deepseek.apiKey is still set in settings.'
+          : 'DeepSeek: API key cleared.',
+      );
+    }),
+    vscode.commands.registerCommand('deepseek.clearApiKey', async () => {
+      await authManager.deleteApiKey();
+      void vscode.window.showInformationMessage('DeepSeek: API key cleared.');
+    }),
+  );
+
   // ─── Register DeepSeek as a Copilot LanguageModelChatProvider ──────
   if (!vscode.lm || typeof (vscode.lm as any).registerLanguageModelChatProvider !== 'function') {
     log.appendLine(
@@ -24,9 +55,7 @@ export function registerCopilotFeatures(context: vscode.ExtensionContext, log: v
     return;
   }
 
-  const dsLogger = new Logger('DeepSeek Copilot');
   try {
-    const authManager = new AuthManager(context.secrets, dsLogger);
     const copilotProvider = new DeepSeekChatProvider(context, authManager, dsLogger);
 
     const disposable = vscode.lm.registerLanguageModelChatProvider(VENDOR_ID, copilotProvider);
