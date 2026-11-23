@@ -69,6 +69,8 @@ class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
   private theme: Record<string, unknown> | undefined;
   /** The last canvas size the webview reported, replayed to every fresh engine instance. */
   private size: { width: number; height: number } | undefined;
+  /** The measured ASCII advances, replayed to every fresh engine instance (see `Input::Metrics`). */
+  private metrics: number[] | undefined;
   /** The workflow document whose form the panel is showing, when one is open. */
   private workflowId: string | undefined;
   /** The workspace's allow/disable choices, kept in memory so two quick ticks cannot lose one. */
@@ -230,6 +232,18 @@ class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
         this.send(message as EngineRequest);
         return;
       }
+      case "metrics": {
+        const widths = (message as { char_widths?: unknown }).char_widths;
+        if (
+          Array.isArray(widths) &&
+          widths.length === 95 &&
+          widths.every((width) => typeof width === "number" && Number.isFinite(width) && width > 0)
+        ) {
+          this.metrics = widths as number[];
+          this.send({ type: "input", event: { op: "metrics", char_widths: this.metrics } });
+        }
+        return;
+      }
       default:
         return;
     }
@@ -335,6 +349,10 @@ class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
       { workerData: options },
     );
     this.worker = worker;
+    // A fresh instance starts with the built-in estimate; hand it the measured table again.
+    if (this.metrics !== undefined) {
+      this.send({ type: "input", event: { op: "metrics", char_widths: this.metrics } });
+    }
     worker.on("message", (message: EngineResponse) => {
       // terminate() does not recall a message already on its way, and a replaced worker must not
       // paint its conversation over its successor.

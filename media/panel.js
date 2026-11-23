@@ -181,6 +181,26 @@
       draw();
     }
   }
+  function sendMetrics() {
+    try {
+      const probe = document.createElement("canvas").getContext("2d");
+      if (!probe) {
+        return;
+      }
+      // The renderer draws with this exact stack, so measuring with it is what the module needs to
+      // place the composer caret. Widths are logical px; the canvas scales by dpr separately.
+      probe.font = '13px "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif';
+      const widths = [];
+      for (let code = 32; code <= 126; code++) {
+        widths.push(probe.measureText(String.fromCharCode(code)).width);
+      }
+      // The harness' `Metrics` variant keeps Rust's snake_case field name (the enum's rename_all
+      // applies to variants only), so `charWidths` would be silently rejected.
+      post({ type: "metrics", char_widths: widths });
+    } catch {
+      // No measurement available; the module keeps its built-in estimate.
+    }
+  }
   function watchTheme() {
     if (typeof MutationObserver !== "function") {
       return;
@@ -362,6 +382,11 @@
   setTimeout(() => sendTheme(false), 0);
   resize();
   canvas.focus();
+  sendMetrics();
+  // Web fonts may land after the first paint, so measure again once they are ready.
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(sendMetrics, () => {});
+  }
   post({ type: "ready" });
 })();
 //! A canvas painter for the `Scene` the harness emits.
