@@ -52,7 +52,18 @@
     "languageModelChatProviders": [
       {
         "vendor": "deepseek",
-        "displayName": "DeepSeek"
+        "displayName": "DeepSeek",
+        "icon": "imgs/logo.png",
+        "configuration": {
+          "title": "DeepSeek",
+          "properties": {
+            "apiKey": {
+              "type": "string",
+              "markdownDescription": "DeepSeek API key used by the DeepSeek models in VS Code Chat. Stored in VS Code secret storage for this provider.",
+              "secret": true
+            }
+          }
+        }
       }
     ],
     "viewsContainers": {
@@ -100,6 +111,11 @@
       {
         "command": "deepseek.account.signOut",
         "title": "Sign Out of Token Allowance",
+        "category": "DeepSeek"
+      },
+      {
+        "command": "deepseek.useAsDefaultModel",
+        "title": "Use as Default Chat Model",
         "category": "DeepSeek"
       },
       {
@@ -273,6 +289,9 @@
         },
         {
           "command": "deepseek.account.signOut"
+        },
+        {
+          "command": "deepseek.useAsDefaultModel"
         },
         {
           "command": "deepseek.advance.newChat"

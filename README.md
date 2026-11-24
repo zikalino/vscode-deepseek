@@ -11,9 +11,12 @@
 
 ## Quick Start
 
-1. Set `deepseek.apiKey` in VS Code settings, or store the key in VS Code secret storage (the Zero panel's **DeepSeek: Set API Key** command uses the same secret). Alternatively, run **DeepSeek: Sign In for Free Tokens** to use the hosted monthly allowance described in [§2](#2-usage) — no DeepSeek key needed.
-2. Open VS Code Chat (`Ctrl+Shift+I`) and pick **DeepSeek V4 Flash** or **DeepSeek V4 Pro** from the model dropdown.
-3. Start asking questions or requesting code changes — DeepSeek works just like Copilot.
+1. Configure a key: set `deepseek.apiKey`, store it with **DeepSeek: Set API Key**, or enter it when VS Code prompts while adding DeepSeek in **Manage Models**. Alternatively, run **DeepSeek: Sign In for Free Tokens** to use the hosted monthly allowance described in [§2](#2-usage) — no DeepSeek key needed.
+2. Open VS Code Chat (`Ctrl+Shift+I`). The model button in the chat input shows the current model — usually a Copilot model such as **Copilot Fusion: Standard**.
+3. Click that model button, then switch to the **DeepSeek** provider tab and pick **DeepSeek V4 Flash** or **DeepSeek V4 Pro**. VS Code always opens the picker on its Copilot tab; third-party providers get their own tab.
+4. Start asking questions or requesting code changes — DeepSeek works just like Copilot.
+
+> If **DeepSeek** does not appear in the picker, open **Manage Models...** (or **Add Models...**) from the picker, select **DeepSeek**, and enable its models. The extension cannot reorder the picker, change its icons, or pre-select a model — that UI belongs to VS Code. To make new chats *start* on DeepSeek, run **DeepSeek: Use as Default Chat Model** (or set the built-in `chat.defaultModel` setting — see [§3](#3-configuration-reference)).
 
 > The **Zero** activity-bar panel is described in [§2](#2-usage).
 
@@ -34,7 +37,7 @@
 
 **SmarterCode DeepSeek** is a VS Code extension that brings DeepSeek's language models (V4 Flash & V4 Pro) directly into your editor. It goes beyond a simple chat wrapper by providing:
 
-- **Copilot integration** — Use DeepSeek as your default model in VS Code Chat. Ask questions, request code changes, search your codebase — all from `Ctrl+Shift+I`.
+- **Copilot integration** — Use DeepSeek in VS Code Chat. Ask questions, request code changes, search your codebase — all from `Ctrl+Shift+I`. VS Code's model picker opens on the Copilot tab; the DeepSeek models live on their own provider tab.
 - **Zero panel (WASM)** — A self-contained agent panel — conversation, history, tasks, tools, workflows and settings — with its agent loop shipped as `advance_harness.wasm`, and an Activity Bar icon of its own.
 - **Failure diagnostics** — Failed requests are dumped to `.smartercode/deepseek-failures/` and can be browsed from the command palette.
 
@@ -44,7 +47,7 @@
 
 ### Configuration — Copilot Integration Mode
 
-API routing is handled automatically via the DeepSeek Copilot provider. No manual API key configuration is typically required.
+API routing is handled automatically via the DeepSeek Copilot provider. Configure a DeepSeek API key, or sign in for the hosted allowance, as described in [Quick Start](#quick-start); no endpoint configuration is needed unless you use a proxy.
 
 To point to a different API endpoint (e.g., a self-hosted proxy), set `deepseek.apiEndpoint` in settings.
 
@@ -72,10 +75,13 @@ configured above, so signing in is never required.
 After configuring your API key, the quickest way to start is through VS Code's built-in chat:
 
 1. Open VS Code Chat — `Ctrl+Shift+I` (Windows/Linux) or `Cmd+Shift+I` (macOS).
-2. Select **DeepSeek V4 Flash** or **DeepSeek V4 Pro** from the model dropdown in the chat input.
-3. Start typing your question
+2. Click the model button in the chat input. It shows the selected model (for example **Copilot Fusion: Standard**).
+3. Switch to the **DeepSeek** provider tab and select **DeepSeek V4 Flash** or **DeepSeek V4 Pro**. Pin the model if you want it to stay at the top of the list.
+4. Start typing your question
 
 > DeepSeek V4 Flash is optimized for speed; V4 Pro offers deeper reasoning. Switch between them per conversation.
+
+> VS Code owns the model picker: extensions contribute provider tabs and model entries, but cannot change the picker's icons, ordering, or selected model. If **DeepSeek** is missing, use **Manage Models...** / **Add Models...** in the picker and enable the DeepSeek models. To start every new chat on DeepSeek, run **DeepSeek: Use as Default Chat Model**, or set `"chat.defaultModel": "deepseek-v4-flash"` (or `"deepseek-v4-pro"`) in your user settings.
 
 **What you can do in Copilot:**
 - Ask questions about your codebase — DeepSeek uses VS Code tools to search, read, and understand your project.
@@ -96,7 +102,7 @@ Run **DeepSeek: Browse Failed Requests** from the command palette to list them. 
 
 **Understanding token usage:**
 
-The output channel reports each turn's cache-miss (`M:`), cache-hit (`H:`) and output (`O:`) token counts. Use `deepseek.model` to switch between the cheaper Flash model and the deeper-reasoning Pro model.
+The output channel reports each turn's cache-miss (`M:`), cache-hit (`H:`) and output (`O:`) token counts. Switch between the cheaper Flash model and the deeper-reasoning Pro model in the chat model picker; `deepseek.model` only selects the model used by the Zero panel.
 
 For deeper diagnostics, set `deepseek-copilot.debugMode` to `"metadata"` or `"verbose"`; request summaries and token usage are logged to the DeepSeek output channel.
 
@@ -230,7 +236,7 @@ The bundled host and module come from the MIT-licensed
 
 ## 3. Configuration Reference
 
-All settings are under the `deepseek.*` and `deepseek-copilot.*` namespaces.
+Extension settings are under the `deepseek.*` and `deepseek-copilot.*` namespaces.
 
 ### Core Settings (`deepseek.*`)
 
@@ -238,7 +244,11 @@ All settings are under the `deepseek.*` and `deepseek-copilot.*` namespaces.
 |---------|------|---------|-------------|
 | `deepseek.apiKey` | string | `""` | DeepSeek API key. Prefer secret storage (for example via **DeepSeek: Set API Key**). |
 | `deepseek.apiEndpoint` | string | `https://api.deepseek.com/chat/completions` | API endpoint override. |
-| `deepseek.model` | string | `"deepseek-v4-flash"` | Model name to use. |
+| `deepseek.model` | string | `"deepseek-v4-flash"` | Model used by the Zero panel. The Copilot provider uses the model selected in VS Code's picker. |
+
+> **Provider key in Manage Models:** the DeepSeek provider also declares an `apiKey` field in VS Code's model-provider settings. VS Code prompts for it when you add DeepSeek in **Manage Models...** and stores it in VS Code secret storage. It is used only by the Copilot provider; the Zero panel uses the `deepseek.*` key described above.
+
+> **Making DeepSeek the default:** run **DeepSeek: Use as Default Chat Model**, or set the built-in `chat.defaultModel` setting to `"deepseek-v4-flash"` or `"deepseek-v4-pro"`. VS Code also accepts the family name `"deepseek"`. This is a VS Code setting, not an extension setting.
 
 ### Hosted Token Allowance (`deepseek.account.*`)
 
@@ -287,6 +297,7 @@ Commands marked with 🔍 are accessible from the **F1 command palette**.
 |-----------|-------|-------------|
 | 🔍 `deepseek.setApiKey` | DeepSeek: Set API Key | Store or replace the DeepSeek API key shared by the Zero panel and the Copilot provider; the dialog pre-fills an existing key, and an empty value clears it. |
 | 🔍 `deepseek.clearApiKey` | DeepSeek: Clear API Key | Remove the stored DeepSeek API key. |
+| 🔍 `deepseek.useAsDefaultModel` | DeepSeek: Use as Default Chat Model | Pick a DeepSeek model and set VS Code's `chat.defaultModel` so new chat conversations start with it. |
 | 🔍 `deepseek.showLogs` | DeepSeek: Browse Failed Requests | Browse the failed-request dumps in `.smartercode/deepseek-failures/`. |
 | 🔍 `deepseek.advance.newChat` | DeepSeek: New Zero Chat | Start a fresh conversation in the Zero panel. |
 | 🔍 `deepseek.advance.abort` | DeepSeek: Stop the Zero Turn | Cancel the current Zero turn. |

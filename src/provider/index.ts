@@ -68,6 +68,19 @@ function normalizeToolInput(rawArgs: string): Record<string, unknown> {
   return { value };
 }
 
+/**
+ * VS Code passes a provider group's resolved settings to
+ * `provideLanguageModelChatInformation`, but the runtime API is newer than the
+ * bundled typings, so keep the shape local and feature-detect it.
+ */
+interface ProviderGroupConfiguration {
+  readonly apiKey?: unknown;
+}
+
+type ProviderInformationOptions = vscode.PrepareLanguageModelChatModelOptions & {
+  readonly configuration?: ProviderGroupConfiguration;
+};
+
 export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
   private log: Logger;
   private auth: AuthManager;
@@ -80,6 +93,8 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
   private prevMessages: readonly vscode.LanguageModelChatRequestMessage[] | undefined;
   private context: vscode.ExtensionContext;
   private clientBaseUrl: string;
+  /** Key from VS Code's model-provider settings, when the user configured one there. */
+  private configuredApiKey: string | undefined;
   private _onDidChange = new vscode.EventEmitter<void>();
 
   readonly onDidChangeLanguageModelChatInformation: vscode.Event<void> = this._onDidChange.event;
@@ -147,11 +162,32 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
     this._onDidChange.fire();
   }
 
+  /**
+   * Remember the key entered in VS Code's provider settings (Manage Models).
+   * VS Code omits `configuration` for its silent discovery call and includes the
+   * resolved group settings — including secrets — for each configured group. A
+   * chat request does not identify its group, so the most recently resolved key
+   * is used (the normal single-group setup is unambiguous).
+   */
+  private captureProviderConfiguration(options: vscode.PrepareLanguageModelChatModelOptions): void {
+    const configuration = (options as ProviderInformationOptions).configuration;
+    if (configuration === undefined) {
+      return;
+    }
+    const apiKey = configuration.apiKey;
+    this.configuredApiKey =
+      typeof apiKey === 'string' && apiKey.trim().length > 0 ? apiKey.trim() : undefined;
+  }
+
   async provideLanguageModelChatInformation(
-    _options: vscode.PrepareLanguageModelChatModelOptions,
+    options: vscode.PrepareLanguageModelChatModelOptions,
     _token: vscode.CancellationToken,
   ): Promise<vscode.LanguageModelChatInformation[]> {
-    const hasKey = (await accountManager(this.context).getAccess()) !== undefined || (await this.auth.getApiKey()) !== undefined;
+    this.captureProviderConfiguration(options);
+    const hasKey =
+      this.configuredApiKey !== undefined ||
+      (await accountManager(this.context).getAccess()) !== undefined ||
+      (await this.auth.getApiKey()) !== undefined;
 
     return MODELS.map((model) => {
       const info: any = {
@@ -169,8 +205,10 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
         },
       };
 
-      if (!hasKey) {
-        info.detail = 'Please run DeepSeek: Set API Key to configure.';
+      // VS Code caches the first (configuration-less) resolution and ignores the
+      // later per-group duplicates, so only hint on a non-silent pass.
+      if (!hasKey && !options.silent) {
+        info.detail = 'Set a key in Manage Models or run "DeepSeek: Set API Key".';
       }
 
       return info as vscode.LanguageModelChatInformation;
@@ -186,13 +224,14 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
     progress: vscode.Progress<vscode.LanguageModelResponsePart>,
     token: vscode.CancellationToken,
   ): Promise<void> {
-    // 1. Auth: a hosted allowance session wins, otherwise the user's own key.
+    // 1. Auth: a hosted allowance session wins, then a key configured in VS Code's
+    // provider settings, then the extension's shared secret/setting.
     const account = await accountManager(this.context).getAccess();
-    const apiKey = account?.apiKey ?? (await this.auth.getApiKey());
+    const apiKey = account?.apiKey ?? this.configuredApiKey ?? (await this.auth.getApiKey());
     if (!apiKey) {
       throw new Error(
-        'DeepSeek API key not configured. Run "DeepSeek: Set API Key" or ' +
-          '"DeepSeek: Sign In for Free Tokens".',
+        'DeepSeek API key not configured. Set a key in Manage Models, run ' +
+          '"DeepSeek: Set API Key", or run "DeepSeek: Sign In for Free Tokens".',
       );
     }
     const client = this.ensureClient(account?.baseUrl ?? this.configuredBaseUrl());
