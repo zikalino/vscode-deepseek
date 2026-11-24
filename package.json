@@ -186,12 +186,7 @@
             "verbose"
           ],
           "default": "minimal",
-          "description": "Controls Copilot request diagnostics. Minimal hides request dumps, metadata logs request summaries, and verbose writes request dump files under global storage."
-        },
-        "deepseek-copilot.dumpRequests": {
-          "type": "boolean",
-          "default": false,
-          "description": "Write raw Copilot/DeepSeek request and response payloads to the workspace `.dump/` folder. Every turn writes several megabytes, so leave this off unless you are debugging message conversion. Retention keeps roughly the newest 100 files of each kind."
+          "description": "Controls Copilot request diagnostics. Minimal hides request summaries; metadata and verbose log request summaries and token usage to the DeepSeek output channel."
         },
         "deepseek.advance.harnessWasm": {
           "type": "string",

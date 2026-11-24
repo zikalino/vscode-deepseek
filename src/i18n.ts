@@ -8,7 +8,6 @@ type MessageKey =
   | 'openSettingsTitle'
   | 'setVisionModelTitle'
   | 'getApiKeyTitle'
-  | 'openRequestDumpsFolderTitle'
   | 'noApiKeyDetail'
   | 'apiKeyAuthFailure'
   | 'insufficientBalance'
@@ -36,7 +35,6 @@ const MESSAGES: Record<Language, Record<MessageKey, string>> = {
     openSettingsTitle: 'DeepSeek: Open Settings',
     setVisionModelTitle: 'DeepSeek: Set Vision Proxy Model',
     getApiKeyTitle: 'DeepSeek: Get API Key',
-    openRequestDumpsFolderTitle: 'DeepSeek: Open Request Dumps Folder',
     noApiKeyDetail: 'Please run DeepSeek: Set API Key to configure.',
     apiKeyAuthFailure: 'DeepSeek API key authentication failed. [Create API Key](https://platform.deepseek.com/api-keys)',
     insufficientBalance: 'DeepSeek API: Insufficient balance. Please add credits to your account.',
@@ -63,7 +61,6 @@ const MESSAGES: Record<Language, Record<MessageKey, string>> = {
     openSettingsTitle: 'DeepSeek：打开设置',
     setVisionModelTitle: 'DeepSeek：设置视觉代理模型',
     getApiKeyTitle: 'DeepSeek：获取 API 密钥',
-    openRequestDumpsFolderTitle: 'DeepSeek：打开请求转储文件夹',
     noApiKeyDetail: '请运行 DeepSeek：设置 API 密钥 进行配置。',
     apiKeyAuthFailure: 'DeepSeek API 密钥认证失败。[创建 API 密钥](https://platform.deepseek.com/api-keys)',
     insufficientBalance: 'DeepSeek API：余额不足。请为账户充值。',

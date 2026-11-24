@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { MODELS, VENDOR_ID, SECRET_KEY, SETTINGS_NS, COPILOT_SETTINGS_NS, DEFAULT_CHARS_PER_TOKEN, EMA_ALPHA, MAX_TOOLS } from '../consts';
+import { MODELS, VENDOR_ID, SECRET_KEY, SETTINGS_NS, DEFAULT_CHARS_PER_TOKEN, EMA_ALPHA, MAX_TOOLS } from '../consts';
 import {
   type ModelDefinition,
   type DeepSeekRequest,
@@ -24,7 +24,6 @@ import {
 } from './convert';
 import { classifyRequest } from './debug/classifier';
 import { buildCacheDiagnostics, computePrefixOverlapRatio } from './debug/diagnostics';
-import { RequestDumper } from './debug/dump';
 import { ReplayEngine } from './replay/engine';
 import { ToolStabilizer, enforceToolLimit } from './tools/flow';
 import { VisionProxy } from './vision/proxy';
@@ -75,7 +74,6 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
   private client: DeepSeekClient;
   private replay: ReplayEngine;
   private stabilizer: ToolStabilizer;
-  private dumper: RequestDumper;
   private vision: VisionProxy;
   private charsPerToken: number = DEFAULT_CHARS_PER_TOKEN;
   private reasoningCache: Map<string, ReasoningEntry> = new Map();
@@ -94,7 +92,6 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
     this.client = new DeepSeekClient(this.clientBaseUrl, log);
     this.replay = new ReplayEngine(log);
     this.stabilizer = new ToolStabilizer(log);
-    this.dumper = new RequestDumper(context, log);
     this.vision = new VisionProxy(log);
 
     // Restore reasoning cache from workspace state
@@ -111,12 +108,6 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
           if (e.affectsConfiguration(`${SETTINGS_NS}.baseUrl`)) {
             this.ensureClient(this.configuredBaseUrl());
           }
-        }
-        if (
-          e.affectsConfiguration(`${COPILOT_SETTINGS_NS}.debugMode`) ||
-          e.affectsConfiguration(`${COPILOT_SETTINGS_NS}.dumpRequests`)
-        ) {
-          this.syncDebugSettings();
         }
       }),
     );
@@ -213,60 +204,10 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
     }
 
     // 3. Debug mode check
-    const debugMode = this.syncDebugSettings();
+    const debugMode = getDebugMode();
 
     // 4. Segment / replay marker extraction
     const segmentId = this.resolveSegmentId(messages);
-
-    // Dump raw Copilot payload to workspace .dump/ when deepseek-copilot.dumpRequests is on
-    this.dumper.dumpCopilotFlat({
-      modelInfo,
-      messages: messages.map((m) => ({
-        role: (m as any).role,
-        content: (m as any).content,
-      })),
-      options: {
-        tools: (options.tools ?? []).map((t: any) => {
-          const def = t?.definition ?? t;
-          return { name: def?.name, description: def?.description, inputSchema: def?.inputSchema ?? def?.parameters };
-        }),
-        modelConfiguration: (options as any)?.modelConfiguration,
-      },
-    });
-
-    if (debugMode === 'verbose') {
-      await this.dumper.dumpCopilotOriginalPayload(segmentId, {
-        modelInfo,
-        messages,
-        options,
-      });
-      await this.dumper.dumpProviderInput(segmentId, {
-        modelInfo,
-        messages: messages.map((m) => ({
-          role: m.role,
-          parts: (m as any).content?.map((p: any) => ({ type: p.type, ...p })),
-        })),
-      });
-      await this.dumper.dumpCopilotMessages(segmentId, {
-        modelInfo,
-        messages: messages.map((m) => ({
-          role: m.role,
-          parts: (m as any).content?.map((p: any) => ({ type: p.type, ...p })),
-        })),
-        options: {
-          tools: (options.tools ?? []).map((t: any) => {
-            const def = t?.definition ?? t;
-            return {
-              name: def?.name,
-              description: def?.description,
-              inputSchema: def?.inputSchema ?? def?.parameters,
-            };
-          }),
-          modelConfiguration: (options as any)?.modelConfiguration,
-          configuration: (options as any)?.configuration,
-        },
-      });
-    }
 
     // 5. Classify request
     const kind = classifyRequest(messages, options.tools);
@@ -315,29 +256,13 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
 
       // 9. Build request
       const request = await this.buildRequest(modelDef, processedMessages, deepseekTools, options, kind);
-      const wireRequest = this.client.toWireRequest(request);
-      // Opt-in: deepseek-copilot.dumpRequests writes this payload to workspace .dump/
-      this.dumper.dumpDeepSeekOutFlat(wireRequest);
-      if (debugMode === 'verbose') {
-        await this.dumper.dumpRequestPayload(segmentId, request);
-        await this.dumper.dumpWireRequestPayload(segmentId, wireRequest);
-        await this.dumper.dumpWireRequestLogFull(segmentId, this.client.formatWirePayload(wireRequest, false));
-      }
 
       // 10. Stream
-      await this.streamResponse(client, request, apiKey, modelDef, progress, token, segmentId, kind);
+      await this.streamResponse(client, request, apiKey, modelDef, progress, token, kind);
     } else {
       // No tools — simplified path
       const request = await this.buildRequest(modelDef, visionMessages, deepseekTools, options, kind);
-      const wireRequest = this.client.toWireRequest(request);
-      // Opt-in: deepseek-copilot.dumpRequests writes this payload to workspace .dump/
-      this.dumper.dumpDeepSeekOutFlat(wireRequest);
-      if (debugMode === 'verbose') {
-        await this.dumper.dumpRequestPayload(segmentId, request);
-        await this.dumper.dumpWireRequestPayload(segmentId, wireRequest);
-        await this.dumper.dumpWireRequestLogFull(segmentId, this.client.formatWirePayload(wireRequest, false));
-      }
-      await this.streamResponse(client, request, apiKey, modelDef, progress, token, segmentId, kind);
+      await this.streamResponse(client, request, apiKey, modelDef, progress, token, kind);
     }
   }
 
@@ -358,15 +283,6 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
   }
 
   // ── Internal methods ────────────────────────────────────────
-
-  private syncDebugSettings(): string {
-    const debugMode = getDebugMode();
-    this.dumper.setEnabled(debugMode === 'verbose');
-    this.dumper.setFlatEnabled(
-      vscode.workspace.getConfiguration(COPILOT_SETTINGS_NS).get<boolean>('dumpRequests', false),
-    );
-    return debugMode;
-  }
 
   private resolveSegmentId(messages: readonly vscode.LanguageModelChatRequestMessage[]): string {
     const marker = this.replay.extractMarker(messages);
@@ -466,7 +382,6 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
     modelDef: ModelDefinition,
     progress: vscode.Progress<vscode.LanguageModelResponsePart>,
     token: vscode.CancellationToken,
-    segmentId: string,
     _kind: string,
   ): Promise<void> {
     // Track reasoning text for caching
@@ -475,7 +390,6 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
     // message with this index.
     const assistantTurnIndex = request.messages.filter((m) => m.role === 'assistant').length;
     const toolCallIds: string[] = [];
-    const inboundSseData: string[] = [];
     // Track response for history logging
     let fullResponseContent = '';
     let lastUsage: DeepSeekUsage | undefined;
@@ -521,9 +435,6 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
             // ToolCallPart may not be available
           }
         },
-        onSseData: (line: string) => {
-          inboundSseData.push(line);
-        },
         onError: (error: Error) => {
           this.log.error('Stream error:', error);
           // Error is surfaced to the user via the thrown promise
@@ -566,11 +477,6 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
 
       await client.streamChatCompletion(request, apiKey, callbacks, abortController.signal);
     } finally {
-      this.dumper.dumpDeepSeekInFlat({
-        model: request.model,
-        receivedAt: new Date().toISOString(),
-        sseData: inboundSseData,
-      });
       disposable.dispose();
     }
   }

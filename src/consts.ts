@@ -43,7 +43,7 @@ export const DEFAULT_ACCOUNT_PROXY_URL = 'http://localhost:8787';
 /** Settings namespace */
 export const SETTINGS_NS = 'deepseek';
 
-/** Settings namespace for Copilot-specific diagnostics (debugMode, dumpRequests) */
+/** Settings namespace for Copilot-specific diagnostics (debugMode) */
 export const COPILOT_SETTINGS_NS = 'deepseek-copilot';
 
 /** Maximum allowed tool functions per request (DeepSeek API limit) */

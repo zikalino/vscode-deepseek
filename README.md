@@ -98,7 +98,7 @@ Run **DeepSeek: Browse Failed Requests** from the command palette to list them. 
 
 The output channel reports each turn's cache-miss (`M:`), cache-hit (`H:`) and output (`O:`) token counts. Use `deepseek.model` to switch between the cheaper Flash model and the deeper-reasoning Pro model.
 
-For deeper diagnostics, set `deepseek-copilot.debugMode` to `"verbose"`. To also capture the raw Copilot and DeepSeek payloads in the workspace `.dump/` folder, enable `deepseek-copilot.dumpRequests` — it writes several megabytes per turn, so it is off by default, and retention keeps roughly the newest 100 files of each kind.
+For deeper diagnostics, set `deepseek-copilot.debugMode` to `"metadata"` or `"verbose"`; request summaries and token usage are logged to the DeepSeek output channel.
 
 ---
 
@@ -253,8 +253,7 @@ Optional. Requires the quota proxy in [`server/`](server/README.md).
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `deepseek-copilot.debugMode` | `"minimal"` \| `"metadata"` \| `"verbose"` | `"minimal"` | Controls request diagnostics and dump file generation. |
-| `deepseek-copilot.dumpRequests` | boolean | `false` | Also write raw Copilot/DeepSeek request and response payloads to the workspace `.dump/` folder (several MB per turn; retention keeps roughly the newest 100 files of each kind). |
+| `deepseek-copilot.debugMode` | `"minimal"` \| `"metadata"` \| `"verbose"` | `"minimal"` | Controls request diagnostics; `"minimal"` hides request summaries, while `"metadata"` and `"verbose"` log them. |
 
 ### Zero Panel Settings (`deepseek.advance.*`)
 
@@ -381,7 +380,7 @@ vscode-deepseek/
 │       ├── index.ts           # DeepSeekChatProvider (Copilot integration)
 │       ├── convert.ts         # Message/tool format conversion
 │       ├── schema.ts          # Schema validation
-│       ├── debug/             # Request dumping & diagnostics
+│       ├── debug/             # Request classification & diagnostics
 │       ├── replay/            # Conversation replay engine
 │       ├── tools/             # Tool stabilization & limits
 │       └── vision/            # Vision proxy for image input
