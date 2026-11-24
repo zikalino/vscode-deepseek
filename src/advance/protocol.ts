@@ -49,7 +49,7 @@ export interface EngineOptions {
    * The surface the module should draw once it is live. The Advance panel leaves this unset (the
    * chat); a workflow tab asks for `workflows` so the same module paints the workflow card.
    */
-  surface?: "chat" | "tasks" | "tools" | "workflows" | "settings";
+  surface?: "chat" | "history" | "tasks" | "tools" | "workflows" | "settings";
   /** Whether the module draws its own surface bar. A single-surface tab turns it off. */
   bar?: boolean;
   /**
@@ -70,18 +70,58 @@ export type EngineRequest =
   | { type: "resize"; width: number; height: number }
   | { type: "stop" };
 
+/** What the harness asks the host to open for a message's View control. */
+export interface ViewRequest {
+  kind: "markdown" | "code" | "text";
+  language: string;
+  name: string;
+  text: string;
+}
+
 /**
  * What the pointer should look like over the panel. The module reports it because only the module
  * knows which rectangle it drew as a button or a text field.
  */
 export type PointerCursor = "default" | "pointer" | "text";
 
+/**
+ * One saved conversation, in the shape the harness's `Conversation` wire type has.
+ *
+ * `lines` is the module's own transcript and `messages` is the provider's wire history, so both are
+ * opaque here: the host stores them and hands them back, and only the module reads them. The
+ * harness leaves `id` and `updated` empty; the host stamps them before storing the entry.
+ */
+export interface Conversation {
+  /** The host's id. Empty in a fresh snapshot; the host assigns one before storing it. */
+  id: string;
+  /** What the list calls it: the first user message, or a name the user chose. */
+  title: string;
+  /** When the host last saved it, in milliseconds since the Unix epoch. */
+  updated: number;
+  /** The last thing said, for the second line of the list. */
+  preview: string;
+  lines: unknown;
+  messages: unknown[];
+}
+
 /** Messages the worker sends back. */
 export type EngineResponse =
   | { type: "scene"; scene: string }
   | { type: "cursor"; cursor: PointerCursor }
   | { type: "status"; message: string }
+  /** A message's View control asked for an editor tab. */
+  | { type: "view"; request: ViewRequest }
+  /** A message's Copy control (or Ctrl+C in the composer) asked for the clipboard. */
+  | { type: "copied"; text: string }
   | { type: "ready" }
+  /** A finished turn's conversation, for the host to store and list. */
+  | { type: "snapshot"; conversation: Conversation }
+  /** The chat opened a saved conversation; later snapshots continue that entry. */
+  | { type: "historyOpen"; id: string }
+  /** The chat started a new conversation; a later snapshot must not overwrite the old entry. */
+  | { type: "historyNew" }
+  | { type: "historyDelete"; id: string }
+  | { type: "historyRename"; id: string; title: string }
   | { type: "openWorkflow"; path: string }
   /** A tool's row was pressed: the host opens the markdown behind a custom or workflow tool. */
   | { type: "openTool"; kind: string; name: string }

@@ -21,7 +21,8 @@ import { SECRET_KEY } from "../consts";
 import { accountManager } from "../account/account";
 import { GitHubAuth } from "../githubAuth";
 import { setAdvanceBridge, type AdvanceBridge } from "./advanceBridge";
-import type { EngineOptions, EngineRequest, EngineResponse } from "./protocol";
+import { mergeSnapshot } from "./history";
+import type { Conversation, EngineOptions, EngineRequest, EngineResponse, ViewRequest } from "./protocol";
 import { advanceSettings, readApiKey, resolveHarnessWasm } from "./settings";
 import { discoverCustomTools, findCustomToolDocument } from "./customTools";
 import { ensureGallery, GALLERY_DIR_NAME } from "./galleryRepo";
@@ -44,6 +45,57 @@ function workspaceRoot(): vscode.Uri | undefined {
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * The VS Code language id for a message the chat asked to view.
+ *
+ * A fenced block's info string is a Markdown convention (`rust`, `sh`, `c++`), not necessarily a
+ * VS Code language id, so the common ones are mapped and the rest fall back to plain text rather
+ * than to a language that does not exist.
+ */
+function viewLanguage(request: ViewRequest): string {
+  if (request.kind === "markdown") {
+    return "markdown";
+  }
+  if (request.kind !== "code") {
+    return "plaintext";
+  }
+  const known: Record<string, string> = {
+    rs: "rust",
+    rust: "rust",
+    py: "python",
+    python: "python",
+    js: "javascript",
+    javascript: "javascript",
+    ts: "typescript",
+    typescript: "typescript",
+    json: "json",
+    html: "html",
+    css: "css",
+    toml: "toml",
+    sh: "shellscript",
+    bash: "shellscript",
+    shell: "shellscript",
+    ps1: "powershell",
+    powershell: "powershell",
+    c: "c",
+    cpp: "cpp",
+    "c++": "cpp",
+    cs: "csharp",
+    csharp: "csharp",
+    go: "go",
+    java: "java",
+    kt: "kotlin",
+    kotlin: "kotlin",
+    sql: "sql",
+    yaml: "yaml",
+    yml: "yaml",
+    xml: "xml",
+    md: "markdown",
+    markdown: "markdown",
+  };
+  return known[request.language.toLowerCase()] ?? "plaintext";
 }
 
 /** The panel. */
@@ -75,6 +127,12 @@ class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
   private workflowId: string | undefined;
   /** The workspace's allow/disable choices, kept in memory so two quick ticks cannot lose one. */
   private enabledTools: Record<string, boolean> = {};
+  /** The saved conversations, newest first: the History surface's list. */
+  private history: Conversation[] = [];
+  /** The conversation the chat is in, so a later snapshot updates that entry. */
+  private activeConversation: string | undefined;
+  /** Set once the file has been read, so a snapshot never writes over a list it has not seen. */
+  private historyLoaded: Promise<void> | undefined;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -279,6 +337,8 @@ class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
       return;
     }
     this.stopEngine();
+    // A fresh module is a fresh conversation: whatever entry the last one was in keeps its text.
+    this.activeConversation = undefined;
     const generation = this.generation;
     const config = advanceSettings();
     const account = await accountManager(this.context).getAccess();
@@ -382,6 +442,37 @@ class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
       case "status":
         this.postStatus(message.message);
         return;
+      case "copied":
+        // The chat's Copy control (and Ctrl+C in its composer): the worker has no clipboard, the
+        // extension host does. An empty copy is silence, not a cleared clipboard.
+        if (message.text.length > 0) {
+          void vscode.env.clipboard.writeText(message.text).then(
+            () => void vscode.window.showInformationMessage("Copied to clipboard."),
+            () => undefined,
+          );
+        }
+        return;
+      case "view":
+        void this.openView(message.request);
+        return;
+      case "snapshot":
+        void this.recordSnapshot(message.conversation);
+        return;
+      case "historyOpen":
+        // The chat restored a saved conversation: later snapshots continue that entry.
+        this.activeConversation = message.id.length > 0 ? message.id : undefined;
+        void this.pushHistory();
+        return;
+      case "historyNew":
+        this.activeConversation = undefined;
+        void this.pushHistory();
+        return;
+      case "historyDelete":
+        void this.removeConversation(message.id);
+        return;
+      case "historyRename":
+        void this.renameConversation(message.id, message.title);
+        return;
       case "openWorkflow":
         await this.openWorkflow(message.path);
         return;
@@ -446,6 +537,8 @@ class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
         if (this.theme !== undefined) {
           this.send({ type: "input", event: this.theme });
         }
+        // The module cannot read the saved list for itself; its History surface draws this one.
+        void this.pushHistory();
         this.pump();
         return;
       case "error":
@@ -455,6 +548,84 @@ class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
       default:
         return;
     }
+  }
+
+  /** Where the saved conversations live: the extension's global storage, so they outlive a folder. */
+  private historyFile(): vscode.Uri {
+    return vscode.Uri.joinPath(this.context.globalStorageUri, "history.json");
+  }
+
+  /** Read the one file the History surface lists, once. */
+  private async ensureHistory(): Promise<void> {
+    if (this.historyLoaded === undefined) {
+      this.historyLoaded = this.readHistory();
+    }
+    return this.historyLoaded;
+  }
+
+  private async readHistory(): Promise<void> {
+    try {
+      const bytes = await vscode.workspace.fs.readFile(this.historyFile());
+      const parsed = JSON.parse(Buffer.from(bytes).toString("utf8")) as unknown;
+      if (Array.isArray(parsed)) {
+        this.history = parsed.filter(
+          (item): item is Conversation =>
+            typeof item === "object" && item !== null && typeof (item as Conversation).id === "string",
+        );
+      }
+    } catch {
+      // No file yet, or one this version cannot read: an empty list is a fine start.
+    }
+  }
+
+  private async saveHistory(): Promise<void> {
+    try {
+      await vscode.workspace.fs.createDirectory(this.context.globalStorageUri);
+      const text = JSON.stringify(this.history);
+      await vscode.workspace.fs.writeFile(this.historyFile(), Buffer.from(text, "utf8"));
+    } catch (error) {
+      this.postStatus(`could not save the conversation history: ${describe(error)}`);
+    }
+  }
+
+  /** Hand the list to the chat, which draws it and cannot read it for itself. */
+  private async pushHistory(): Promise<void> {
+    await this.ensureHistory();
+    this.send({
+      type: "input",
+      event: {
+        op: "history",
+        items: this.history,
+        active: this.activeConversation ?? null,
+        now: Date.now(),
+      },
+    });
+  }
+
+  private async recordSnapshot(conversation: Conversation): Promise<void> {
+    await this.ensureHistory();
+    const merged = mergeSnapshot(this.history, this.activeConversation, conversation, Date.now());
+    this.history = merged.history;
+    this.activeConversation = merged.active;
+    await this.saveHistory();
+    await this.pushHistory();
+  }
+
+  private async removeConversation(id: string): Promise<void> {
+    await this.ensureHistory();
+    this.history = this.history.filter((item) => item.id !== id);
+    if (this.activeConversation === id) {
+      this.activeConversation = undefined;
+    }
+    await this.saveHistory();
+    await this.pushHistory();
+  }
+
+  private async renameConversation(id: string, title: string): Promise<void> {
+    await this.ensureHistory();
+    this.history = this.history.map((item) => (item.id === id ? { ...item, title } : item));
+    await this.saveHistory();
+    await this.pushHistory();
   }
 
   /**
@@ -509,6 +680,34 @@ class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
       });
     } catch (error) {
       this.postStatus(`could not open ${name}: ${describe(error)}`);
+    }
+  }
+
+  /**
+   * The chat's View control: open the message in a normal editor tab.
+   *
+   * A reply opens as Markdown — the preview beside it is the markdown viewer VS Code has — and a
+   * reply that is one fenced block opens in that block's language. Anything else is plain text.
+   */
+  private async openView(request: ViewRequest): Promise<void> {
+    try {
+      const document = await vscode.workspace.openTextDocument({
+        content: request.text,
+        language: viewLanguage(request),
+      });
+      await vscode.window.showTextDocument(document, {
+        preview: true,
+        viewColumn: vscode.ViewColumn.Active,
+      });
+      if (request.kind === "markdown" && request.text.trim().length > 0) {
+        try {
+          await vscode.commands.executeCommand("markdown.showPreviewToSide", document.uri);
+        } catch {
+          // The editor tab is already open; a build without the Markdown preview is still usable.
+        }
+      }
+    } catch (error) {
+      this.postStatus(`could not open the message: ${describe(error)}`);
     }
   }
 }

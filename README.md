@@ -35,7 +35,7 @@
 **SmarterCode DeepSeek** is a VS Code extension that brings DeepSeek's language models (V4 Flash & V4 Pro) directly into your editor. It goes beyond a simple chat wrapper by providing:
 
 - **Copilot integration** — Use DeepSeek as your default model in VS Code Chat. Ask questions, request code changes, search your codebase — all from `Ctrl+Shift+I`.
-- **Zero panel (WASM)** — A self-contained agent panel — conversation, tasks, tools, workflows and settings — with its agent loop shipped as `advance_harness.wasm`, and an Activity Bar icon of its own.
+- **Zero panel (WASM)** — A self-contained agent panel — conversation, history, tasks, tools, workflows and settings — with its agent loop shipped as `advance_harness.wasm`, and an Activity Bar icon of its own.
 - **Failure diagnostics** — Failed requests are dumped to `.smartercode/deepseek-failures/` and can be browsed from the command palette.
 
 ---
@@ -123,11 +123,17 @@ with VS Code's authentication provider (and, when already signed in, asks whethe
 the **key** icon runs the shared **DeepSeek: Set API Key** flow.
 
 The panel is multi-surface. The bar along its top switches between **Agent** (the conversation),
-**Tasks**, **Tools** (the calls the agent may make under the current grant), **Workflows** and
-**Settings**. Settings is a destination in that bar rather than a separate button beside it. Workflows
-are the documents in `.advance/workflows/*.md`, and pressing a card opens its form: the same
-WASM-rendered markdown form the desktop Advance sets a workflow in, with its fields and its `script`
-buttons. The module draws the form; the host only runs the script the form's **Run** presses.
+**History**, **Tasks**, **Tools** (the calls the agent may make under the current grant), **Workflows**
+and **Settings**. Settings is a destination in that bar rather than a separate button beside it.
+Workflows are the documents in `.advance/workflows/*.md`, and pressing a card opens its form: the
+same WASM-rendered markdown form the desktop Advance sets a workflow in, with its fields and its
+`script` buttons. The module draws the form; the host only runs the script the form's **Run** presses.
+
+**History** is the saved conversations. The module draws the list, but it has no disk of its own, so
+the extension host stores each finished turn in `history.json` in the extension's global storage and
+hands the list back; a conversation therefore survives a window restart, and the desktop shell keeps
+its own copy in its profile. A card opens that conversation, **New chat** starts another, and rename
+and delete are saved too.
 
 **DeepSeek: Run Workflow...** and **DeepSeek: Show Workflow...** open the chosen workflow in a
 WASM-rendered tab showing that form. Filling the fields and pressing a script's **Run** runs that

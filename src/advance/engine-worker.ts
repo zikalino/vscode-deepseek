@@ -14,7 +14,7 @@ import { parentPort, workerData } from "node:worker_threads";
 
 import { Guest, type Effects } from "./guest";
 import { NetPumps } from "./netpump";
-import type { EngineOptions, EngineRequest, EngineResponse } from "./protocol";
+import type { Conversation, EngineOptions, EngineRequest, EngineResponse, ViewRequest } from "./protocol";
 import { Router } from "./router";
 import { discoverWorkflows } from "./workflows";
 
@@ -56,8 +56,36 @@ function emitLogs(scene: string): void {
       post({ type: "busy", busy: rest[0] === "1" });
     } else if (verb === "turn-done") {
       post({ type: "turnDone" });
+    } else if (verb === "copied" && rest.length > 0) {
+      const text = parseCopied(rest.join("\t"));
+      if (text !== undefined) {
+        post({ type: "copied", text });
+      }
+    } else if (verb === "view" && rest.length > 0) {
+      const request = parseViewRequest(rest.join("\t"));
+      if (request !== undefined) {
+        post({ type: "view", request });
+      }
     } else if (verb === "toolEnabled" && rest.length >= 2) {
       post({ type: "toolEnabled", name: rest[0], enabled: rest[1] === "1" });
+    } else if (verb === "snapshot" && rest.length > 0) {
+      const conversation = parseConversation(rest.join("\t"));
+      if (conversation !== undefined) {
+        post({ type: "snapshot", conversation });
+      }
+    } else if (verb === "historyOpen") {
+      post({ type: "historyOpen", id: (rest[0] ?? "").trim() });
+    } else if (verb === "historyNew") {
+      post({ type: "historyNew" });
+    } else if (verb === "historyDelete" || verb === "historyRename") {
+      const request = parseHistoryRequest(rest.join("\t"));
+      if (request !== undefined) {
+        if (verb === "historyDelete") {
+          post({ type: "historyDelete", id: request.id });
+        } else {
+          post({ type: "historyRename", id: request.id, title: request.title });
+        }
+      }
     }
   }
 }
@@ -86,6 +114,81 @@ function parseRun(json: string): { script: string; values: Record<string, string
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+/** The `copied` line's payload: the text the host should put on the clipboard. */
+function parseCopied(json: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return undefined;
+  }
+  return typeof parsed === "string" ? parsed : undefined;
+}
+
+/** The `view` line's payload: the text the host should open, and how. */
+function parseViewRequest(json: string): ViewRequest | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(parsed) || typeof parsed.text !== "string") {
+    return undefined;
+  }
+  const kind =
+    parsed.kind === "markdown" || parsed.kind === "code" || parsed.kind === "text"
+      ? parsed.kind
+      : "text";
+  return {
+    kind,
+    language: typeof parsed.language === "string" ? parsed.language : "",
+    name: typeof parsed.name === "string" ? parsed.name : "",
+    text: parsed.text,
+  };
+}
+
+/**
+ * The `snapshot` line's payload: one conversation, as the host stores it.
+ *
+ * The harness fills the title, preview and the two opaque payloads; `id` and `updated` come back
+ * empty because stamping them is the host's job, so they are normalised here rather than trusted.
+ */
+function parseConversation(json: string): Conversation | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(parsed)) {
+    return undefined;
+  }
+  return {
+    id: typeof parsed.id === "string" ? parsed.id : "",
+    title: typeof parsed.title === "string" ? parsed.title : "",
+    updated:
+      typeof parsed.updated === "number" && Number.isFinite(parsed.updated) ? parsed.updated : 0,
+    preview: typeof parsed.preview === "string" ? parsed.preview : "",
+    lines: Array.isArray(parsed.lines) ? parsed.lines : [],
+    messages: Array.isArray(parsed.messages) ? parsed.messages : [],
+  };
+}
+
+/** A `historyDelete`/`historyRename` line's payload: which entry, and the new title. */
+function parseHistoryRequest(json: string): { id: string; title: string } | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(parsed) || typeof parsed.id !== "string") {
+    return undefined;
+  }
+  return { id: parsed.id, title: typeof parsed.title === "string" ? parsed.title : "" };
 }
 
 let width = Math.max(1, Math.floor(options.width ?? 800));
