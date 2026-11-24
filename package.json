@@ -1,6 +1,6 @@
 {
   "name": "vscode-deepseek-obsidian",
-  "version": "0.0.48",
+  "version": "0.0.49",
   "description": "DeepSeek-powered coding assistant for VS Code with Copilot integration and an autonomous Zero panel.",
   "license": "ISC",
   "author": "",
