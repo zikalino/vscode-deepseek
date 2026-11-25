@@ -1,5 +1,5 @@
 # SmarterCode DeepSeek
-**Version: 0.0.49**
+**Version: 0.0.50**
 
 > **⚠️ IMPORTANT NOTE — Production & Preview Features**
 >
@@ -8,6 +8,10 @@
 > The **Zero panel** is an experimental, self-contained agent harness. It is functional but may see breaking changes as it is refined.
 >
 > Feedback and contributions are welcome — they help shape the final features!
+
+SmarterCode DeepSeek extension is heavily focusing on reducing token usage and includes detailed usage profiling capabilities:
+
+![alt text](image.png)
 
 ## Quick Start
 
