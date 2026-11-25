@@ -12,6 +12,7 @@ import { request as httpsRequest } from "node:https";
 import type { ClientRequest, IncomingMessage } from "node:http";
 
 import { decodeBase64, headerField, optionalNumber, optionalString, stringField, type Header } from "./abi";
+import type { EngineUsage } from "./protocol";
 
 /** One queued `advance_abi::wasm::NetPoll`, already in its wire shape. */
 type NetPoll =
@@ -69,7 +70,10 @@ export class NetPumps {
   private next = 1;
 
   /** @param allowedOrigin the provider origin (`scheme://host[:port]`) every fetch must share. */
-  constructor(private readonly allowedOrigin: string) {}
+  constructor(
+    private readonly allowedOrigin: string,
+    private readonly onUsage: (usage: EngineUsage) => void = () => undefined,
+  ) {}
 
   /** Start a fetch from a `FetchRequest` JSON; always returns a handle. */
   begin(requestJson: string): number {
@@ -137,18 +141,24 @@ export class NetPumps {
     if (body !== undefined) {
       headers["content-length"] = String(body.length);
     }
+    const model = requestModel(body);
 
     const transport = url.protocol === "http:" ? httpRequest : httpsRequest;
     const request = transport(url, { method, headers }, (response: IncomingMessage) => {
+      const status = response.statusCode ?? 0;
       pump.push({
         kind: "start",
-        status: response.statusCode ?? 0,
+        status,
         headers: rawHeaders(response),
       });
+      // Only a successful completion carries a `usage` object; a 4xx/5xx body does not.
+      const tap = status >= 200 && status < 300 ? new UsageTap(model, this.onUsage) : undefined;
       response.on("data", (chunk: Buffer) => {
+        tap?.push(chunk);
         pump.push({ kind: "chunk", data: chunk.toString("base64") });
       });
       response.on("end", () => {
+        tap?.finish();
         pump.push({ kind: "end" });
       });
       response.on("error", (error: Error) => {
@@ -173,4 +183,123 @@ function rawHeaders(response: IncomingMessage): Header[] {
     headers.push({ name: response.rawHeaders[index], value: response.rawHeaders[index + 1] });
   }
   return headers;
+}
+
+/** The request body's `model`, when it is the JSON chat-completions body we expect. */
+function requestModel(body: Buffer | undefined): string {
+  if (body === undefined) {
+    return "";
+  }
+  const parsed = parseJson(body.toString("utf8"));
+  return isRecord(parsed) && typeof parsed.model === "string" ? parsed.model : "";
+}
+
+/**
+ * How much of the response tail is kept for parsing. The usage frame arrives last, so a long
+ * completion does not need to be buffered in full just to read it.
+ */
+const USAGE_TAIL_LIMIT = 256 * 1024;
+
+/**
+ * Reads the `usage` object out of one chat-completions response.
+ *
+ * The upstream body is either a JSON object or an SSE stream whose final `data:` frame carries
+ * `usage` (the harness asks for `stream_options.include_usage`). The tap only reports, never
+ * changes what the guest receives.
+ */
+class UsageTap {
+  private tail = "";
+  private readonly decoder = new TextDecoder();
+
+  constructor(
+    private readonly model: string,
+    private readonly emit: (usage: EngineUsage) => void,
+  ) {}
+
+  push(chunk: Buffer): void {
+    this.tail += this.decoder.decode(chunk, { stream: true });
+    if (this.tail.length > USAGE_TAIL_LIMIT) {
+      this.tail = this.tail.slice(-USAGE_TAIL_LIMIT);
+    }
+  }
+
+  finish(): void {
+    this.tail += this.decoder.decode();
+    const usage = usageFromBody(this.tail);
+    if (usage !== undefined) {
+      this.emit({ model: this.model, ...usage });
+    }
+  }
+}
+
+interface UsageFields {
+  promptTokens: number;
+  completionTokens: number;
+  cacheHitTokens: number;
+  cacheMissTokens: number;
+}
+
+function usageFromBody(body: string): UsageFields | undefined {
+  const text = body.trim();
+  if (text.length === 0) {
+    return undefined;
+  }
+
+  // A non-streamed response is one JSON object.
+  const direct = usageFields(parseJson(text));
+  if (direct !== undefined) {
+    return direct;
+  }
+
+  // An SSE response repeats `data: {...}` lines; the usage frame is the final one.
+  let found: UsageFields | undefined;
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("data:")) {
+      continue;
+    }
+    const payload = trimmed.slice("data:".length).trim();
+    if (payload.length === 0 || payload === "[DONE]") {
+      continue;
+    }
+    const fields = usageFields(parseJson(payload));
+    if (fields !== undefined) {
+      found = fields;
+    }
+  }
+  return found;
+}
+
+function usageFields(value: unknown): UsageFields | undefined {
+  if (!isRecord(value) || !isRecord(value.usage)) {
+    return undefined;
+  }
+  const usage = value.usage;
+  const promptTokens = numberField(usage.prompt_tokens);
+  const completionTokens = numberField(usage.completion_tokens);
+  if (promptTokens === 0 && completionTokens === 0) {
+    return undefined;
+  }
+  return {
+    promptTokens,
+    completionTokens,
+    cacheHitTokens: numberField(usage.prompt_cache_hit_tokens),
+    cacheMissTokens: numberField(usage.prompt_cache_miss_tokens),
+  };
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function numberField(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

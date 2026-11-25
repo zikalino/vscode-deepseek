@@ -159,6 +159,15 @@ export type RequestKind =
 
 // ─── Cache diagnostics ────────────────────────────────────────
 
+/** How the sent tool list differs from the previous request's list. */
+export interface ToolListChange {
+  added: string[];
+  removed: string[];
+  /** Same names, different order. */
+  reordered: boolean;
+  changed: boolean;
+}
+
 export interface CacheDiagnostics {
   segmentId: string;
   segmentSource: 'markerFound' | 'markerMissing' | 'markerInvalid';
@@ -170,4 +179,20 @@ export interface CacheDiagnostics {
   prefixOverlapRatio?: number;
   visionStats?: VisionProxyStats;
   replayMarkerReported: boolean;
+  /** Number of tool definitions in the serialized request. */
+  toolCount?: number;
+  /** Characters in the serialized tool block (the largest prefix contributor). */
+  toolsChars?: number;
+  /** Fingerprint of the serialized tool block, after sorting and truncation. */
+  toolsHash?: string;
+  /** Characters in the normalized system message. */
+  systemChars?: number;
+  /** Fingerprint of the normalized system message. */
+  systemHash?: string;
+  /** Characters in the serialized message block. */
+  messageChars?: number;
+  /** How the tool list differs from the previous request's. */
+  toolListChange?: ToolListChange;
+  /** True when the normalized system message differs from the previous request's. */
+  systemChanged?: boolean;
 }

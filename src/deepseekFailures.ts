@@ -52,10 +52,19 @@ export interface FailureLogger {
  * silently dropping them.
  */
 export function getFailuresDir(create = true): string {
+  return getSmartercodeDir('deepseek-failures', create);
+}
+
+/** Where a cache miss is recorded, next to the failure dumps. */
+export function getCacheDiagnosticsDir(create = true): string {
+  return getSmartercodeDir('deepseek-cache', create);
+}
+
+function getSmartercodeDir(leaf: string, create: boolean): string {
   const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const dir = root
-    ? path.join(root, '.smartercode', 'deepseek-failures')
-    : path.join(os.tmpdir(), 'deepseek-failures');
+    ? path.join(root, '.smartercode', leaf)
+    : path.join(os.tmpdir(), leaf);
   if (create) {
     fs.mkdirSync(dir, { recursive: true });
   }

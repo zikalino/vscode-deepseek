@@ -1,5 +1,6 @@
 import type * as vscode from 'vscode';
-import type { CacheDiagnostics, VisionProxyStats } from '../../types';
+import type { CacheDiagnostics, DeepSeekRequest, VisionProxyStats } from '../../types';
+import { normalizeSessionContext } from '../convert';
 
 /**
  * Builds a CacheDiagnostics snapshot from the incoming request.
@@ -75,36 +76,115 @@ function simpleHash(input: string): string {
   return Math.abs(hash).toString(36);
 }
 
-/**
- * Compute prefix overlap ratio between two consecutive requests.
- * 1.0 = identical prefix, 0.0 = no overlap.
- */
-export function computePrefixOverlapRatio(
-  prevMessages: readonly vscode.LanguageModelChatRequestMessage[] | undefined,
-  currentMessages: readonly vscode.LanguageModelChatRequestMessage[],
-): number | undefined {
-  if (!prevMessages || prevMessages.length === 0) return undefined;
-
-  let overlap = 0;
-  const maxLen = Math.min(prevMessages.length, currentMessages.length);
-
-  for (let i = 0; i < maxLen; i++) {
-    const prev = extractText(prevMessages[i]);
-    const curr = extractText(currentMessages[i]);
-    if (prev === curr) {
-      overlap++;
-    } else {
-      break;
-    }
-  }
-
-  return maxLen > 0 ? overlap / maxLen : undefined;
+export interface RequestSectionStats {
+  toolNames: string[];
+  toolsChars: number;
+  toolsHash: string;
+  systemChars: number;
+  systemHash: string;
+  messageChars: number;
 }
 
-function extractText(msg: vscode.LanguageModelChatRequestMessage): string {
+/**
+ * Measure the request sections in the order they contribute to the cached
+ * prefix. The tool block dominates a Copilot request, so a cache miss is only
+ * attributable once its size and fingerprint are recorded next to the system
+ * and message blocks — `prefixOverlap` alone compares messages and reports a
+ * perfect 1.00 while every tool token is being re-billed.
+ */
+export function summarizeRequestSections(request: DeepSeekRequest): RequestSectionStats {
+  const tools = request.tools ?? [];
+  const toolsJson = JSON.stringify(tools);
+  const systemText = request.messages
+    .filter((message) => message.role === 'system')
+    .map((message) => message.content)
+    .join('\n');
+  return {
+    toolNames: tools.map((tool) => tool.function.name),
+    toolsChars: toolsJson.length,
+    toolsHash: simpleHash(toolsJson),
+    systemChars: systemText.length,
+    systemHash: simpleHash(systemText),
+    messageChars: JSON.stringify(request.messages).length,
+  };
+}
+
+/**
+ * Compare the message list of two consecutive requests.
+ * `ratio` is 1.0 when the previous request is a prefix of the current one
+ * (nothing was dropped or rewritten).
+ */
+export interface MessagePrefixComparison {
+  /** Matched share of the shorter list, 0..1. */
+  ratio: number;
+  /** Number of leading messages that are identical. */
+  matched: number;
+  /** Message count of the previous request. */
+  previousCount: number;
+  /** Message count of the current request. */
+  currentCount: number;
+  /** First message that differs inside the compared range. */
+  divergedAt?: {
+    index: number;
+    previousRole: string;
+    currentRole: string;
+    previousChars: number;
+    currentChars: number;
+  };
+}
+
+export interface PrefixComparisonOptions {
+  /** Compare system messages after session-identifier normalization (matches the wire payload). */
+  normalizeSessionContext?: boolean;
+}
+
+export function compareMessagePrefix(
+  prevMessages: readonly vscode.LanguageModelChatRequestMessage[] | undefined,
+  currentMessages: readonly vscode.LanguageModelChatRequestMessage[],
+  options?: PrefixComparisonOptions,
+): MessagePrefixComparison | undefined {
+  if (!prevMessages || prevMessages.length === 0) return undefined;
+
+  const compared = Math.min(prevMessages.length, currentMessages.length);
+  if (compared === 0) return undefined;
+
+  let matched = 0;
+  let divergedAt: MessagePrefixComparison['divergedAt'];
+
+  for (let i = 0; i < compared; i++) {
+    const prev = extractText(prevMessages[i], options?.normalizeSessionContext === true);
+    const curr = extractText(currentMessages[i], options?.normalizeSessionContext === true);
+    if (prev === curr) {
+      matched++;
+      continue;
+    }
+    divergedAt = {
+      index: i,
+      previousRole: String((prevMessages[i] as any)?.role ?? 'unknown'),
+      currentRole: String((currentMessages[i] as any)?.role ?? 'unknown'),
+      previousChars: prev.length,
+      currentChars: curr.length,
+    };
+    break;
+  }
+
+  return {
+    ratio: matched / compared,
+    matched,
+    previousCount: prevMessages.length,
+    currentCount: currentMessages.length,
+    divergedAt,
+  };
+}
+
+function extractText(msg: vscode.LanguageModelChatRequestMessage, normalizeSystem: boolean): string {
   const parts = (msg as any).content ?? [];
-  return parts
+  const text = parts
     .filter((p: any) => p.type === 'text')
     .map((p: any) => p.value ?? '')
     .join(' ');
+  if (normalizeSystem && String((msg as any)?.role) === 'system') {
+    return normalizeSessionContext(text);
+  }
+  return text;
 }

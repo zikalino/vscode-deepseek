@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { MODELS, VENDOR_ID, SECRET_KEY, SETTINGS_NS, DEFAULT_CHARS_PER_TOKEN, EMA_ALPHA, MAX_TOOLS } from '../consts';
+import { MODELS, VENDOR_ID, SECRET_KEY, SETTINGS_NS, COPILOT_SETTINGS_NS, DEFAULT_CHARS_PER_TOKEN, EMA_ALPHA, MAX_TOOLS } from '../consts';
 import {
   type ModelDefinition,
   type DeepSeekRequest,
@@ -7,6 +7,8 @@ import {
   type ReasoningHistoryState,
   type DeepSeekTool,
   type DeepSeekUsage,
+  type CacheDiagnostics,
+  type ToolListChange,
 } from '../types';
 import { Logger } from '../logger';
 import { AuthManager } from '../auth';
@@ -18,16 +20,27 @@ import {
   getConfiguredTemperature,
   getConfiguredThinkingEffort,
   countMessageChars,
+} from './convert';
+import {
+  hashText,
+  pruneReasoningCache as pruneReasoningEntries,
   reasoningIndexKey,
   reasoningTextKey,
   reasoningToolCallKey,
-} from './convert';
+} from './reasoningCache';
 import { classifyRequest } from './debug/classifier';
-import { buildCacheDiagnostics, computePrefixOverlapRatio } from './debug/diagnostics';
+import {
+  buildCacheDiagnostics,
+  compareMessagePrefix,
+  summarizeRequestSections,
+  type MessagePrefixComparison,
+} from './debug/diagnostics';
+import { buildCacheMissRecord, shouldRecordCacheMiss, writeCacheMissRecord } from './debug/cacheMissLog';
 import { ReplayEngine } from './replay/engine';
-import { ToolStabilizer, enforceToolLimit } from './tools/flow';
+import { ToolStabilizer, enforceToolLimit, sortToolsDeterministically } from './tools/flow';
 import { VisionProxy } from './vision/proxy';
 import { getDebugMode } from './schema';
+import { recordApiUsage } from '../usage';
 
 const REASONING_STORAGE_KEY = 'deepseek.reasoningHistory';
 
@@ -91,6 +104,10 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
   private charsPerToken: number = DEFAULT_CHARS_PER_TOKEN;
   private reasoningCache: Map<string, ReasoningEntry> = new Map();
   private prevMessages: readonly vscode.LanguageModelChatRequestMessage[] | undefined;
+  /** Ordered tool names from the previous request, for cache-miss diagnostics. */
+  private prevToolNames: string[] | undefined;
+  /** Fingerprint of the previous request's normalized system message. */
+  private prevSystemHash: string | undefined;
   private context: vscode.ExtensionContext;
   private clientBaseUrl: string;
   /** Key from VS Code's model-provider settings, when the user configured one there. */
@@ -251,21 +268,26 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
     // 5. Classify request
     const kind = classifyRequest(messages, options.tools);
 
-    // 6. Build cache diagnostics
-    const diagnostics = buildCacheDiagnostics(segmentId, 'markerMissing', messages);
-    if (debugMode !== 'minimal') {
-      this.log.info(`[${kind}] segment=${segmentId} msgs=${messages.length}`);
-    }
+    // 6. Message-prefix diagnostics (the system and tool blocks are measured
+    //    after conversion, once their wire form is known)
+    const prefix = compareMessagePrefix(this.prevMessages, messages, {
+      normalizeSessionContext: this.stabilizePromptCache(),
+    });
+    this.prevMessages = messages;
 
     // 7. Vision proxy
-    const { resolvedMessages: visionMessages, stats: visionStats } = await this.vision.resolveImages(messages);
+    const { resolvedMessages: visionMessages } = await this.vision.resolveImages(messages);
 
     // 8. Tool flow
     const vsCodeTools = options.tools ?? [];
     let deepseekTools: DeepSeekTool[] | undefined;
+    let processedMessages: readonly vscode.LanguageModelChatRequestMessage[] = visionMessages;
     if (modelDef.supportsToolCalling && vsCodeTools.length > 0) {
       deepseekTools = convertTools(vsCodeTools) ?? [];
       deepseekTools = enforceToolLimit(deepseekTools, this.log);
+      // Registration order is not stable across a session resume; sorting keeps
+      // the cached prefix independent of MCP connect timing.
+      deepseekTools = sortToolsDeterministically(deepseekTools);
 
       // Tool stabilization
       const stabilizeEnabled = vscode.workspace
@@ -288,21 +310,107 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
         progress.report(toolCallPart);
       }
 
-      // Add drift notice
-      const processedMessages = driftNotice
-        ? this.injectDriftNotice(visionMessages, driftNotice)
-        : visionMessages;
-
-      // 9. Build request
-      const request = await this.buildRequest(modelDef, processedMessages, deepseekTools, options, kind);
-
-      // 10. Stream
-      await this.streamResponse(client, request, apiKey, modelDef, progress, token, kind);
-    } else {
-      // No tools — simplified path
-      const request = await this.buildRequest(modelDef, visionMessages, deepseekTools, options, kind);
-      await this.streamResponse(client, request, apiKey, modelDef, progress, token, kind);
+      if (driftNotice) {
+        processedMessages = this.injectDriftNotice(visionMessages, driftNotice);
+      }
     }
+
+    // 9. Build request
+    const conversationId = this.conversationId(messages);
+    const request = await this.buildRequest(modelDef, processedMessages, deepseekTools, options, kind, conversationId);
+
+    // 10. Cache diagnostics, then stream
+    const diagnostics = this.collectCacheDiagnostics(
+      kind,
+      segmentId,
+      messages,
+      request,
+      prefix,
+      debugMode,
+    );
+    await this.streamResponse(client, request, apiKey, modelDef, progress, token, kind, diagnostics, conversationId);
+  }
+
+  /** Measure the wire request and attribute any cache miss to the block that changed. */
+  private collectCacheDiagnostics(
+    kind: string,
+    segmentId: string,
+    messages: readonly vscode.LanguageModelChatRequestMessage[],
+    request: DeepSeekRequest,
+    prefix: MessagePrefixComparison | undefined,
+    debugMode: string,
+  ): CacheDiagnostics {
+    const sections = summarizeRequestSections(request);
+    const toolListChange = this.describeToolChange(sections.toolNames);
+    const systemChanged =
+      this.prevSystemHash !== undefined && this.prevSystemHash !== sections.systemHash;
+    this.prevSystemHash = sections.systemHash;
+
+    const diagnostics = buildCacheDiagnostics(segmentId, 'markerMissing', messages);
+    diagnostics.prefixOverlapRatio = prefix?.ratio;
+    diagnostics.toolCount = sections.toolNames.length;
+    diagnostics.toolsChars = sections.toolsChars;
+    diagnostics.toolsHash = sections.toolsHash;
+    diagnostics.systemChars = sections.systemChars;
+    diagnostics.systemHash = sections.systemHash;
+    diagnostics.messageChars = sections.messageChars;
+    diagnostics.toolListChange = toolListChange;
+    diagnostics.systemChanged = systemChanged;
+
+    if (debugMode !== 'minimal') {
+      const details: string[] = [
+        `[${kind}] segment=${segmentId} msgs=${messages.length} tools=${sections.toolNames.length}`,
+        `toolChars=${sections.toolsChars}`,
+        `sysChars=${sections.systemChars}`,
+        `msgChars=${sections.messageChars}`,
+      ];
+      if (toolListChange.changed) {
+        const order = toolListChange.reordered ? ' reordered' : '';
+        details.push(
+          `toolsChanged(+${toolListChange.added.length}/-${toolListChange.removed.length}${order})`,
+        );
+      }
+      if (systemChanged) {
+        details.push('systemChanged');
+      }
+      if (prefix) {
+        details.push(`prefixOverlap=${prefix.ratio.toFixed(2)}`);
+        details.push(`msgsPrev=${prefix.previousCount}`);
+        if (prefix.divergedAt) {
+          const d = prefix.divergedAt;
+          details.push(
+            `divergedAt=#${d.index}(${d.previousRole}->${d.currentRole} ${d.previousChars}->${d.currentChars} chars)`,
+          );
+        } else if (prefix.currentCount < prefix.previousCount) {
+          details.push('contextShrank');
+        }
+      }
+      this.log.info(details.join(' '));
+    }
+
+    return diagnostics;
+  }
+
+  /** Compare the sent tool names with the previous request's list. */
+  private describeToolChange(toolNames: string[]): ToolListChange {
+    const previous = this.prevToolNames;
+    this.prevToolNames = toolNames;
+    if (previous === undefined) {
+      return { added: [], removed: [], reordered: false, changed: false };
+    }
+
+    const previousSet = new Set(previous);
+    const currentSet = new Set(toolNames);
+    const added = toolNames.filter((name) => !previousSet.has(name));
+    const removed = previous.filter((name) => !currentSet.has(name));
+    const reordered =
+      added.length === 0 && removed.length === 0 && previous.join('\n') !== toolNames.join('\n');
+    return {
+      added,
+      removed,
+      reordered,
+      changed: added.length > 0 || removed.length > 0 || reordered,
+    };
   }
 
   // ── provideTokenCount ───────────────────────────────────────
@@ -334,14 +442,13 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
     tools: DeepSeekTool[] | undefined,
     options: vscode.ProvideLanguageModelChatResponseOptions,
     _kind: string,
+    conversationId: string,
   ): Promise<DeepSeekRequest> {
-    // Reasoning cache management — clear if this is turn 0 or 1 (new session)
-    if (messages.length <= 2) {
-      this.reasoningCache.clear();
-    }
-
     // Message conversion
-    const deepseekMessages = convertMessages(messages, this.reasoningCache);
+    const deepseekMessages = convertMessages(messages, this.reasoningCache, {
+      normalizeSessionContext: this.stabilizePromptCache(),
+      conversationId,
+    });
     if (deepseekMessages.length === 0) {
       const messageShapeSummary = messages.map((m, idx) => {
         const role = String((m as any).role);
@@ -421,7 +528,9 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
     modelDef: ModelDefinition,
     progress: vscode.Progress<vscode.LanguageModelResponsePart>,
     token: vscode.CancellationToken,
-    _kind: string,
+    kind: string,
+    diagnostics: CacheDiagnostics,
+    conversationId: string,
   ): Promise<void> {
     // Track reasoning text for caching
     let fullReasoningText = '';
@@ -487,28 +596,38 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
               text: fullReasoningText,
               timestamp: Date.now(),
             };
-            this.reasoningCache.set(reasoningIndexKey(assistantTurnIndex), entry);
+            this.reasoningCache.set(reasoningIndexKey(conversationId, assistantTurnIndex), entry);
             for (const id of toolCallIds) {
               this.reasoningCache.set(reasoningToolCallKey(id), entry);
             }
             if (toolCallIds.length === 0 && fullResponseContent.trim()) {
               this.reasoningCache.set(reasoningTextKey(fullResponseContent), entry);
             }
-            this.pruneReasoningCache();
+            pruneReasoningEntries(this.reasoningCache);
             this.persistReasoningCache(this.context);
           }
         },
         onUsage: (usage: DeepSeekUsage) => {
           lastUsage = usage;
           this.handleUsage(usage, request);
-          const debugMode = getDebugMode();
-          if (debugMode !== 'minimal') {
-            const cacheHit = usage.prompt_cache_hit_tokens ?? 0;
-            const cacheMiss = usage.prompt_cache_miss_tokens ?? 0;
-            const completion = usage.completion_tokens;
+          const cacheHit = usage.prompt_cache_hit_tokens ?? 0;
+          const cacheMiss = usage.prompt_cache_miss_tokens ?? 0;
+          const completion = usage.completion_tokens;
+          const prompt = usage.prompt_tokens || cacheHit + cacheMiss;
+          const hitRate = prompt > 0 ? (cacheHit / prompt) * 100 : 0;
+          if (getDebugMode() !== 'minimal') {
             this.log.info(
-              `M:${cacheMiss} H:${cacheHit} O:${completion} ` +
-              `temp: ${request.temperature ?? 'default'}`,
+              `[${kind}] M:${cacheMiss} H:${cacheHit}/${prompt} (${hitRate.toFixed(1)}%) ` +
+              `O:${completion} temp: ${request.temperature ?? 'default'}`,
+            );
+          }
+          // A large miss is kept on disk: the output channel rotates, and the
+          // request that follows a session resume is exactly the one whose
+          // diagnostics must survive.
+          if (shouldRecordCacheMiss(usage)) {
+            writeCacheMissRecord(
+              buildCacheMissRecord(diagnostics, usage, request.model, kind),
+              this.log,
             );
           }
         },
@@ -520,8 +639,16 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
     }
   }
 
-  private handleUsage(usage: DeepSeekUsage, _request: DeepSeekRequest): void {
-    const totalRequestChars = countMessageChars(_request.messages);
+  private handleUsage(usage: DeepSeekUsage, request: DeepSeekRequest): void {
+    recordApiUsage({
+      source: 'copilot',
+      model: request.model,
+      promptTokens: usage.prompt_tokens,
+      completionTokens: usage.completion_tokens,
+      cacheHitTokens: usage.prompt_cache_hit_tokens,
+      cacheMissTokens: usage.prompt_cache_miss_tokens,
+    });
+    const totalRequestChars = countMessageChars(request.messages);
     const totalTokens = usage.prompt_tokens + usage.completion_tokens;
     if (totalTokens > 0 && totalRequestChars > 0) {
       const observed = totalRequestChars / totalTokens;
@@ -560,6 +687,36 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
       .join(' ');
   }
 
+  /** Keep the system-prompt prefix stable across conversations (prompt caching). */
+  private stabilizePromptCache(): boolean {
+    return vscode.workspace
+      .getConfiguration(COPILOT_SETTINGS_NS)
+      .get<boolean>('stabilizePromptCache', true);
+  }
+
+  /**
+   * Stable id for the conversation, used only to scope positional reasoning.
+   * The shared environment preamble is identical in every conversation and is
+   * skipped; the first real user turn is unique and never changes while the
+   * conversation grows.
+   */
+  private conversationId(messages: readonly vscode.LanguageModelChatRequestMessage[]): string {
+    for (const msg of messages) {
+      if (String((msg as any).role).toLowerCase() !== 'user') {
+        continue;
+      }
+      const text = this.getMessageText(msg).trim();
+      if (!text) {
+        continue;
+      }
+      if (/^<system_reminder>[\s\S]*<\/system_reminder>$/.test(text)) {
+        continue;
+      }
+      return hashText(text).slice(0, 16);
+    }
+    return '';
+  }
+
   private restoreReasoningCache(context: vscode.ExtensionContext): void {
     try {
       const stored = context.workspaceState.get<ReasoningHistoryState>(REASONING_STORAGE_KEY);
@@ -581,19 +738,6 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
       }
     } catch {
       // ignore
-    }
-  }
-
-  private pruneReasoningCache(): void {
-    const MAX_ENTRIES = 200;
-    if (this.reasoningCache.size <= MAX_ENTRIES) {
-      return;
-    }
-    const entries = Array.from(this.reasoningCache.entries())
-      .sort((a, b) => a[1].timestamp - b[1].timestamp);
-    const overflow = this.reasoningCache.size - MAX_ENTRIES;
-    for (let i = 0; i < overflow; i++) {
-      this.reasoningCache.delete(entries[i][0]);
     }
   }
 

@@ -19,6 +19,7 @@ import * as vscode from "vscode";
 
 import { SECRET_KEY } from "../consts";
 import { accountManager } from "../account/account";
+import { recordApiUsage } from "../usage";
 import { GitHubAuth } from "../githubAuth";
 import { setAdvanceBridge, type AdvanceBridge } from "./advanceBridge";
 import { mergeSnapshot } from "./history";
@@ -441,6 +442,9 @@ class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
         return;
       case "status":
         this.postStatus(message.message);
+        return;
+      case "usage":
+        recordApiUsage({ source: "zero", ...message.usage });
         return;
       case "copied":
         // The chat's Copy control (and Ctrl+C in its composer): the worker has no clipboard, the

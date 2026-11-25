@@ -9,57 +9,43 @@ import {
   TEMPERATURE_VALUES,
 } from '../types';
 import { VENDOR_ID, SETTINGS_NS } from '../consts';
+import { lookupReasoning } from './reasoningCache';
 
-// ─── Reasoning cache keys ─────────────────────────────────────
+// ─── Prompt cache stabilization ──────────────────────────────
 
 /**
- * Reasoning cache keys. DeepSeek requires `reasoning_content` to be echoed back
- * on every assistant turn when the request carries `tools`; a missing value is a
- * 400 ("Request body format error"). Assistant turns are matched by tool-call id
- * first (stable across requests), then by response text, then by position.
+ * VS Code embeds a fresh session identifier in the system prompt
+ * (`<session_context>` session folder, and the `VSCODE_TARGET_SESSION_LOG`
+ * path on older builds). DeepSeek caches an exact prompt prefix, so in a new
+ * conversation the cache dies at that identifier and everything after it —
+ * including every tool definition — is billed as an uncached miss. Replacing
+ * the identifier with a fixed placeholder keeps the prefix stable.
+ *
+ * A session resume rewrites the same prompt with a different drive-letter case
+ * (`Current working directory: C:\…` becomes `c:\…`). That single byte sits
+ * near the top of the environment block, so it invalidates the rest of the
+ * prefix just as effectively; folding drive letters keeps it stable.
  */
-export function reasoningToolCallKey(toolCallId: string): string {
-  return `tc:${toolCallId}`;
+const SESSION_ID_PLACEHOLDER = '00000000-0000-0000-0000-000000000000';
+const SESSION_ID_PATTERN =
+  '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
+
+/** A Windows drive prefix (`C:\` or `C:/`); the letter's case is not stable across a resume. */
+const DRIVE_PATH_PATTERN = /\b([A-Za-z]):(?=[\\/])/g;
+
+/** Replace per-session and per-resume identifiers in a system prompt with stable values. */
+export function normalizeSessionContext(text: string): string {
+  return text
+    .replace(new RegExp(`(session-state[\\\\/])${SESSION_ID_PATTERN}`, 'g'), `$1${SESSION_ID_PLACEHOLDER}`)
+    .replace(new RegExp(`(debug-logs[\\\\/])${SESSION_ID_PATTERN}`, 'g'), `$1${SESSION_ID_PLACEHOLDER}`)
+    .replace(DRIVE_PATH_PATTERN, (_match, drive: string) => `${drive.toLowerCase()}:`);
 }
 
-export function reasoningTextKey(text: string): string {
-  return `txt:${hashText(text.trim())}`;
-}
-
-export function reasoningIndexKey(index: number): string {
-  return `idx:${index}`;
-}
-
-function hashText(text: string): string {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return (hash >>> 0).toString(16);
-}
-
-function lookupReasoning(
-  reasoningCache: Map<string, ReasoningEntry>,
-  toolCallIds: string[],
-  text: string,
-  turnIndex: number,
-  hasTextKeys: boolean,
-): ReasoningEntry | undefined {
-  for (const id of toolCallIds) {
-    const entry = reasoningCache.get(reasoningToolCallKey(id));
-    if (entry) return entry;
-  }
-
-  if (hasTextKeys) {
-    const trimmed = text.trim();
-    if (trimmed) {
-      const entry = reasoningCache.get(reasoningTextKey(trimmed));
-      if (entry) return entry;
-    }
-  }
-
-  return reasoningCache.get(reasoningIndexKey(turnIndex));
+export interface ConvertMessageOptions {
+  /** Normalize per-session and per-resume identifiers in system messages (prompt cache stability). */
+  normalizeSessionContext?: boolean;
+  /** Conversation fingerprint; scopes the positional reasoning fallback. */
+  conversationId?: string;
 }
 
 // ─── Message conversion ───────────────────────────────────────
@@ -71,6 +57,7 @@ function lookupReasoning(
 export function convertMessages(
   messages: readonly vscode.LanguageModelChatRequestMessage[],
   reasoningCache: Map<string, ReasoningEntry>,
+  options?: ConvertMessageOptions,
 ): DeepSeekMessage[] {
   const result: DeepSeekMessage[] = [];
   let assistantTurnIndex = 0;
@@ -118,9 +105,12 @@ export function convertMessages(
         }
       }
 
-      const text = getMessageText(msg);
+      let text = getMessageText(msg);
       if (!text) {
         continue;
+      }
+      if (role === 'system' && options?.normalizeSessionContext) {
+        text = normalizeSessionContext(text);
       }
       result.push({
         role,
@@ -196,13 +186,13 @@ export function convertMessages(
 
       // Thinking parts are authoritative; fall back to the reasoning cache for
       // turns where VS Code does not replay thinking back to the provider.
-      const cached = lookupReasoning(
-        reasoningCache,
-        toolCalls.map((tc) => tc.id),
-        assistantContent,
-        assistantTurnIndex,
-        hasTextReasoningKeys,
-      );
+      const cached = lookupReasoning(reasoningCache, {
+        toolCallIds: toolCalls.map((tc) => tc.id),
+        text: assistantContent,
+        conversationId: options?.conversationId ?? '',
+        turnIndex: assistantTurnIndex,
+        hasTextKeys: hasTextReasoningKeys,
+      });
       const reasoning = partReasoning || cached?.text || '';
       if (reasoning.trim().length > 0) {
         assistant.reasoning_content = reasoning;

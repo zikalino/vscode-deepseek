@@ -26,6 +26,7 @@ import { readWorkflowDocument } from "./workflowFiles";
 import { discoverWorkflows, type WorkflowBrief } from "./workflows";
 import { runWorkflowDocument } from "./workflowRunner";
 import { accountManager } from "../account/account";
+import { recordApiUsage } from "../usage";
 
 const VIEW_TYPE = "deepseek.advanceWorkflow";
 
@@ -307,6 +308,9 @@ class WorkflowTab {
         return;
       case "status":
         this.postStatus(message.message);
+        return;
+      case "usage":
+        recordApiUsage({ source: "zero", ...message.usage });
         return;
       case "openWorkflow":
         await this.openWorkflow(message.path);

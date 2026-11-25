@@ -270,7 +270,9 @@ function start(): void {
       galleryUrl: options.galleryUrl,
       githubToken: options.githubToken,
     });
-    const pumps = new NetPumps(origin(options.apiUrl));
+    const pumps = new NetPumps(origin(options.apiUrl), (usage) => {
+      post({ type: "usage", usage });
+    });
 
     guest = Guest.load(readFileSync(options.wasmPath), {
       hostCall: (request) => router.call(request),

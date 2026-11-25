@@ -36,6 +36,23 @@ export function enforceToolLimit(tools: DeepSeekTool[], log?: Logger): DeepSeekT
 }
 
 /**
+ * Sort tool definitions by name before they are sent.
+ *
+ * DeepSeek caches an exact prompt prefix and the tool block is serialized into
+ * that prefix, so the order VS Code happens to produce decides where the cache
+ * breaks. Registration order is not stable across a session resume: MCP servers
+ * connect asynchronously, and subagent tools appear and disappear with the
+ * selection. Sorting makes the wire order independent of that timing.
+ */
+export function sortToolsDeterministically(tools: DeepSeekTool[]): DeepSeekTool[] {
+  return [...tools].sort((a, b) => {
+    const left = a.function?.name ?? '';
+    const right = b.function?.name ?? '';
+    return left < right ? -1 : left > right ? 1 : 0;
+  });
+}
+
+/**
  * Tool list stabilization (experimental):
  * - Inspects conversation for activate_* preflight tool calls
  * - Emits missing LanguageModelToolCallParts for activators not yet called

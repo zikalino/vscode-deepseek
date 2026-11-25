@@ -39,7 +39,7 @@
 
 - **Copilot integration** — Use DeepSeek in VS Code Chat. Ask questions, request code changes, search your codebase — all from `Ctrl+Shift+I`. VS Code's model picker opens on the Copilot tab; the DeepSeek models live on their own provider tab.
 - **Zero panel (WASM)** — A self-contained agent panel — conversation, history, tasks, tools, workflows and settings — with its agent loop shipped as `advance_harness.wasm`, and an Activity Bar icon of its own.
-- **Failure diagnostics** — Failed requests are dumped to `.smartercode/deepseek-failures/` and can be browsed from the command palette.
+- **Failure diagnostics** — Failed requests are dumped to `.smartercode/deepseek-failures/` and can be browsed from the command palette. Requests that miss most of the prompt cache are recorded to `.smartercode/deepseek-cache/`.
 
 ---
 
@@ -100,11 +100,29 @@ A request that fails — an HTTP error such as 502, or a network error — is wr
 
 Run **DeepSeek: Browse Failed Requests** from the command palette to list them. Selecting a row opens the request body, the response body, or the full dump.
 
+**Prompt-cache diagnostics:**
+
+A request that misses most of the prompt cache is recorded as `.smartercode/deepseek-cache/last-miss.json`, with a timestamped copy of the newest 20. The record separates the three blocks that form the cached prefix — tool definitions, system message and conversation — reporting each block's size, fingerprint and what changed since the previous request (`tools` added/removed/reordered, `system.changed`, `messages.prefixOverlapRatio`). Token counts alone cannot tell "the conversation grew" from "the tool list was re-registered"; this record can.
+
+Tool definitions are also sorted by name before they are sent, so MCP registration timing or a subagent selection cannot reorder the prompt and invalidate the cache on every resume.
+
 **Understanding token usage:**
 
 The output channel reports each turn's cache-miss (`M:`), cache-hit (`H:`) and output (`O:`) token counts. Switch between the cheaper Flash model and the deeper-reasoning Pro model in the chat model picker; `deepseek.model` only selects the model used by the Zero panel.
 
-For deeper diagnostics, set `deepseek-copilot.debugMode` to `"metadata"` or `"verbose"`; request summaries and token usage are logged to the DeepSeek output channel.
+**Token usage graph:** run **DeepSeek: Show Token Usage Graph** (or press the graph icon in the Zero view's title bar) to open a live chart with one thin bar per API call. The bar's height is the call's total tokens; the stacked slices are output at the top, uncached input — the cache miss — in the middle, and cache-hit input at the bottom. Hover a bar for its exact counts, model, source and time. The chart updates as each request completes, for both Copilot turns and Zero turns. Samples are shared across VS Code windows and kept for the running VS Code session, and **Clear** empties them. The API itself is stateless, so a bar means one request, not one conversation total.
+
+For deeper diagnostics, set `deepseek-copilot.debugMode` to `"metadata"` or `"verbose"`; request summaries and token usage are logged to the DeepSeek output channel. In `"verbose"` mode each request also reports:
+
+- `prefixOverlap` — share of the shorter message list shared with the previous request. `1.00` means the previous request was a prefix (a normal append); lower means history was dropped, reordered or re-serialized.
+- `divergedAt=#N(role->role a->b chars)` — the first message that differed, with its index, roles and text lengths.
+- `contextShrank` — the message list got shorter without a differing message, i.e. turns were removed from the end.
+- `toolsChanged` — the ordered tool list differs from the previous request, which invalidates everything rendered after the system message.
+- On completion, `H:<hit>/<prompt> (<pct>%)` — cache-hit tokens against the whole prompt.
+
+A hit percentage far below `prefixOverlap` (or a `divergedAt` at a low index while the tail looks unchanged) points to a provider-side cache miss rather than a rewritten history.
+
+**About prompt caching:** DeepSeek caches an exact prompt *prefix* in 64-token blocks. Tool definitions render after the system message, so any change in the system prompt invalidates every tool schema behind it. VS Code puts a fresh session UUID in the system prompt on each new conversation, which used to cost roughly 30k cached tokens per new chat; `deepseek-copilot.stabilizePromptCache` (enabled by default) normalizes that UUID so the prefix survives.
 
 ---
 
@@ -264,6 +282,7 @@ Optional. Requires the quota proxy in [`server/`](server/README.md).
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `deepseek-copilot.debugMode` | `"minimal"` \| `"metadata"` \| `"verbose"` | `"minimal"` | Controls request diagnostics; `"minimal"` hides request summaries, while `"metadata"` and `"verbose"` log them. |
+| `deepseek-copilot.stabilizePromptCache` | boolean | `true` | Replaces the per-session identifiers VS Code embeds in the system prompt (`<session_context>` folder and the `VSCODE_TARGET_SESSION_LOG` path) with a stable placeholder. DeepSeek caches an exact prefix, so a new session UUID would otherwise invalidate the rest of the prompt *and* every tool definition. Disable to send the prompt unchanged. |
 
 ### Zero Panel Settings (`deepseek.advance.*`)
 
@@ -299,6 +318,7 @@ Commands marked with 🔍 are accessible from the **F1 command palette**.
 | 🔍 `deepseek.clearApiKey` | DeepSeek: Clear API Key | Remove the stored DeepSeek API key. |
 | 🔍 `deepseek.useAsDefaultModel` | DeepSeek: Use as Default Chat Model | Pick a DeepSeek model and set VS Code's `chat.defaultModel` so new chat conversations start with it. |
 | 🔍 `deepseek.showLogs` | DeepSeek: Browse Failed Requests | Browse the failed-request dumps in `.smartercode/deepseek-failures/`. |
+| 🔍 `deepseek.showUsageGraph` | DeepSeek: Show Token Usage Graph | Open a live per-request token chart: cache hit, input miss and output for every API call. |
 | 🔍 `deepseek.advance.newChat` | DeepSeek: New Zero Chat | Start a fresh conversation in the Zero panel. |
 | 🔍 `deepseek.advance.abort` | DeepSeek: Stop the Zero Turn | Cancel the current Zero turn. |
 | 🔍 `deepseek.advance.runWorkflow` | DeepSeek: Run Workflow... | List the workspace's workflows and open the chosen one's WASM form; its Run starts the script. |
@@ -372,7 +392,7 @@ After install, reload VS Code:
 ```
 vscode-deepseek/
 ├── src/
-│   ├── extension.ts           # Activation: Copilot provider, Zero panel, failure browser
+│   ├── extension.ts           # Activation: Copilot provider, Zero panel, failure browser, usage graph
 │   ├── auth.ts                # API key management via SecretStorage
 │   ├── consts.ts              # Constants & model definitions
 │   ├── types.ts               # TypeScript types
@@ -381,6 +401,8 @@ vscode-deepseek/
 │   ├── copilot.ts             # Registers the LanguageModelChatProvider
 │   ├── deepseekFailures.ts    # Writes failed-request dumps
 │   ├── deepseekLogBrowser.ts  # Webview for browsing failure dumps
+│   ├── usage.ts               # Per-request token samples for the graph
+│   ├── usageGraph.ts          # Live token-usage webview
 │   ├── advance/               # WASM harness host + Zero panel provider
 │   │   ├── customTools.ts     # Global tools folder discovery/parsing
 │   │   ├── toolCatalogue.ts   # Tool-definition wire types + name sanitising

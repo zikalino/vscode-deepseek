@@ -18,6 +18,7 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile",
+    "test": "node --test \"server/*.test.mjs\" \"test/*.test.cjs\"",
     "lint": "echo \"No lint configured\""
   },
   "dependencies": {},
@@ -39,6 +40,7 @@
     "onStartupFinished",
     "onLanguageModelChatProvider:deepseek",
     "onCommand:deepseek.showLogs",
+    "onCommand:deepseek.showUsageGraph",
     "onCommand:deepseek.advance.newChat",
     "onCommand:deepseek.advance.abort",
     "onCommand:deepseek.advance.runWorkflow",
@@ -97,6 +99,11 @@
       {
         "command": "deepseek.showLogs",
         "title": "DeepSeek: Browse Failed Requests"
+      },
+      {
+        "command": "deepseek.showUsageGraph",
+        "title": "DeepSeek: Show Token Usage Graph",
+        "icon": "$(graph)"
       },
       {
         "command": "deepseek.account.signIn",
@@ -204,6 +211,11 @@
           "default": "minimal",
           "description": "Controls Copilot request diagnostics. Minimal hides request summaries; metadata and verbose log request summaries and token usage to the DeepSeek output channel."
         },
+        "deepseek-copilot.stabilizePromptCache": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Replace the per-session identifiers VS Code puts in the system prompt (`<session_context>` folder and the `VSCODE_TARGET_SESSION_LOG` path) with a stable placeholder. DeepSeek caches an exact prompt prefix, so a new session UUID invalidates every token after it — including all tool definitions. Disable to send the prompt unchanged."
+        },
         "deepseek.advance.harnessWasm": {
           "type": "string",
           "default": "",
@@ -272,6 +284,11 @@
           "command": "deepseek.advance.openWorkflowDocument",
           "when": "view == deepseek.advanceView",
           "group": "navigation@4"
+        },
+        {
+          "command": "deepseek.showUsageGraph",
+          "when": "view == deepseek.advanceView",
+          "group": "navigation@5"
         }
       ],
       "commandPalette": [
@@ -316,6 +333,9 @@
         },
         {
           "command": "deepseek.advance.openSettings"
+        },
+        {
+          "command": "deepseek.showUsageGraph"
         }
       ]
     }

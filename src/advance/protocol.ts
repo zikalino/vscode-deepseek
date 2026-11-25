@@ -104,11 +104,22 @@ export interface Conversation {
   messages: unknown[];
 }
 
+/** One completed API call's token usage, forwarded from the worker's fetch proxy. */
+export interface EngineUsage {
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  cacheHitTokens: number;
+  cacheMissTokens: number;
+}
+
 /** Messages the worker sends back. */
 export type EngineResponse =
   | { type: "scene"; scene: string }
   | { type: "cursor"; cursor: PointerCursor }
   | { type: "status"; message: string }
+  /** One completed API call, for the token-usage graph. */
+  | { type: "usage"; usage: EngineUsage }
   /** A message's View control asked for an editor tab. */
   | { type: "view"; request: ViewRequest }
   /** A message's Copy control (or Ctrl+C in the composer) asked for the clipboard. */
