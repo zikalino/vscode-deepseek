@@ -110,7 +110,7 @@ Tool definitions are also sorted by name before they are sent, so MCP registrati
 
 The output channel reports each turn's cache-miss (`M:`), cache-hit (`H:`) and output (`O:`) token counts. Switch between the cheaper Flash model and the deeper-reasoning Pro model in the chat model picker; `deepseek.model` only selects the model used by the Zero panel.
 
-**Token usage graph:** run **DeepSeek: Show Token Usage Graph** (or press the graph icon in the Zero view's title bar) to open a live chart with one thin bar per API call. The bar's height is the call's total tokens; the stacked slices are output at the top, uncached input — the cache miss — in the middle, and cache-hit input at the bottom. Hover a bar for its exact counts, model, source and time. The chart updates as each request completes, for both Copilot turns and Zero turns. Samples are shared across VS Code windows and kept for the running VS Code session, and **Clear** empties them. The API itself is stateless, so a bar means one request, not one conversation total.
+**Token usage graph:** run **DeepSeek: Show Token Usage Graph** (or press the graph icon in the Zero view's title bar) to open a live chart with one thin bar per API call. The bar's height is the call's total tokens; the stacked slices are output at the top, uncached input — the cache miss — in the middle, and cache-hit input at the bottom. Hover a bar for its exact counts, model, source and time. Each bar also carries a dollar cost, priced from its own model and hour: the built-in off-peak DeepSeek prices, doubled inside the peak windows (01:00–04:00 and 06:00–10:00 UTC, Monday–Friday) — a peak bar's tooltip says so. The chart updates as each request completes, for both Copilot turns and Zero turns. Samples are shared across VS Code windows and kept for the running VS Code session, and **Clear** empties them. The API itself is stateless, so a bar means one request, not one conversation total.
 
 For deeper diagnostics, set `deepseek-copilot.debugMode` to `"metadata"` or `"verbose"`; request summaries and token usage are logged to the DeepSeek output channel. In `"verbose"` mode each request also reports:
 
@@ -293,7 +293,10 @@ Optional. Requires the quota proxy in [`server/`](server/README.md).
 | `deepseek.advance.allowWrite` | boolean | `true` | Let the Zero agent's built-in file tools create, edit, move and delete files in the first workspace folder. A custom tool or workflow the user has allowed runs its own `write` steps regardless; those writes stay inside the workspace. |
 | `deepseek.advance.allowedCommands` | string[] | `[]` | Programs the built-in shell tool may run. Empty removes the shell tool entirely. A custom tool or workflow the user has allowed runs its own `command` steps regardless. |
 | `deepseek.advance.commandTimeoutSeconds` | number (1–3600) | `120` | How long a Zero command may run before it is killed. |
-| `deepseek.advance.pricing.*` | number | `0` | Dollars per million tokens for the panel's cost divider (zero hides the figures). |
+| `deepseek.advance.pricing.models` | object | `{}` | Off-peak dollars per million tokens per model id, for example `{ "deepseek-v4-pro": { "inputPerMillion": 0.66 } }`. Models left out use the built-in DeepSeek prices (V4 Flash and V4 Pro). |
+| `deepseek.advance.pricing.peakMultiplier` | number | `2` | Multiple of the off-peak prices charged in peak hours (01:00–04:00 and 06:00–10:00 UTC, Monday–Friday). `1` bills every hour at the off-peak rate. |
+| `deepseek.advance.pricing.holidays` | string[] | `[]` | UTC dates (`YYYY-MM-DD`) billed at the off-peak rate all day, such as Chinese public holidays. |
+| `deepseek.advance.pricing.inputPerMillion`, `.cachedPerMillion`, `.outputPerMillion` | number | `0` | Flat per-million rates for every model, for the panel's cost divider. Non-zero replaces the built-in per-model table. |
 
 ### Internal Copilot Settings (advanced)
 

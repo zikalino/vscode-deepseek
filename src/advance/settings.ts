@@ -8,6 +8,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 
 import { SECRET_KEY } from "../consts";
+import { harnessPricing } from "../pricingSettings";
 import { DEFAULT_GALLERY_URL } from "./galleryRepo";
 
 export interface AdvanceSettings {
@@ -18,7 +19,7 @@ export interface AdvanceSettings {
   commandTimeoutMs: number;
   /** The public gallery to clone and publish to. */
   galleryUrl: string;
-  /** Dollars per million tokens, for the chat's cost divider (all zero hides the figures). */
+  /** Off-peak dollars per million tokens for the configured model (all zero hides the figures). */
   pricing: { inputPerMillion: number; cachedPerMillion: number; outputPerMillion: number };
 }
 
@@ -35,11 +36,7 @@ export function advanceSettings(): AdvanceSettings {
     allowWrite: advance.get<boolean>("allowWrite", true),
     commandTimeoutMs: Math.max(1, seconds) * 1000,
     galleryUrl: advance.get<string>("galleryUrl", DEFAULT_GALLERY_URL).trim() || DEFAULT_GALLERY_URL,
-    pricing: {
-      inputPerMillion: advance.get<number>("pricing.inputPerMillion", 0),
-      cachedPerMillion: advance.get<number>("pricing.cachedPerMillion", 0),
-      outputPerMillion: advance.get<number>("pricing.outputPerMillion", 0),
-    },
+    pricing: harnessPricing(),
   };
 }
 

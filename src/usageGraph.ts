@@ -8,28 +8,12 @@ import { randomBytes } from "node:crypto";
 import * as vscode from "vscode";
 
 import { getUsageJournal, getUsageRecorder, USAGE_SAMPLE_LIMIT } from "./usage";
+import { readPricingRules } from "./pricingSettings";
 
 const VIEW_TYPE = "deepseek.usageGraph";
 const TITLE = "DeepSeek: Token Usage";
 /** How often the panel checks the shared journal for samples written by other windows. */
 const POLL_INTERVAL_MS = 500;
-
-/** Dollars per million tokens, read from the shared pricing settings. */
-interface Pricing {
-  inputPerMillion: number;
-  cachedPerMillion: number;
-  outputPerMillion: number;
-}
-
-/** The Zero panel's pricing settings also drive the graph, so both show the same money. */
-function readPricing(): Pricing {
-  const advance = vscode.workspace.getConfiguration("deepseek.advance");
-  return {
-    inputPerMillion: advance.get<number>("pricing.inputPerMillion", 0) || 0,
-    cachedPerMillion: advance.get<number>("pricing.cachedPerMillion", 0) || 0,
-    outputPerMillion: advance.get<number>("pricing.outputPerMillion", 0) || 0,
-  };
-}
 
 let currentPanel: vscode.WebviewPanel | undefined;
 let unsubscribe: (() => void) | undefined;
@@ -72,12 +56,12 @@ function openUsageGraph(): void {
 
   const sendAll = (): void => {
     if (journal === undefined) {
-      post({ type: "init", samples: getUsageRecorder().snapshot(), pricing: readPricing() });
+      post({ type: "init", samples: getUsageRecorder().snapshot(), pricing: readPricingRules() });
       return;
     }
     const slice = journal.read(0);
     offset = slice.offset;
-    post({ type: "init", samples: slice.samples, pricing: readPricing() });
+    post({ type: "init", samples: slice.samples, pricing: readPricingRules() });
   };
 
   const startPolling = (): void => {
@@ -110,14 +94,17 @@ function openUsageGraph(): void {
     if (command?.type === "clear") {
       getUsageRecorder().clear();
       offset = 0;
-      post({ type: "init", samples: [], pricing: readPricing() });
+      post({ type: "init", samples: [], pricing: readPricingRules() });
     }
   });
 
   // Prices are edited in settings; push them live instead of waiting for a reopen.
   const configuration = vscode.workspace.onDidChangeConfiguration((event) => {
-    if (event.affectsConfiguration("deepseek.advance.pricing")) {
-      post({ type: "pricing", pricing: readPricing() });
+    if (
+      event.affectsConfiguration("deepseek.advance.pricing") ||
+      event.affectsConfiguration("deepseek.model")
+    ) {
+      post({ type: "pricing", pricing: readPricingRules() });
     }
   });
 
@@ -224,18 +211,19 @@ function getHtml(webview: vscode.Webview): string {
     #donutCard[hidden] { display: none; }
     #donut { width: 76px; height: 76px; }
     #donutLegend { display: flex; flex-direction: column; gap: 1px; font-size: 10px; line-height: 1.35; }
-    #donutLegend .row { display: grid; grid-template-columns: 8px 34px 30px 44px; align-items: center; gap: 6px; }
-    #donutLegend .row.total,
-    #donutLegend .row.cost {
-      grid-template-columns: 1fr auto;
+    #donutLegend .row { display: grid; grid-template-columns: 8px 34px 30px 44px 48px; align-items: center; gap: 6px; }
+    #donutLegend .row.total {
+      grid-template-columns: 1fr auto auto;
       margin-top: 2px;
       padding-top: 2px;
       border-top: 1px solid var(--vscode-panel-border);
     }
     #donutLegend .name { opacity: 0.75; }
     #donutLegend .pct,
-    #donutLegend .val { text-align: right; }
-    #donutLegend .val { opacity: 0.9; }
+    #donutLegend .val,
+    #donutLegend .cost { text-align: right; }
+    #donutLegend .val,
+    #donutLegend .cost { opacity: 0.9; }
     #donutLegend .swatch { width: 8px; height: 8px; border-radius: 2px; }
     #empty {
       position: absolute;
@@ -288,11 +276,10 @@ function getHtml(webview: vscode.Webview): string {
     <div id="donutCard" hidden>
       <canvas id="donut" width="76" height="76" aria-hidden="true"></canvas>
       <div id="donutLegend">
-        <div class="row"><i class="swatch" style="background: var(--vscode-charts-green, #3fb950)"></i><span class="name">hit</span><span class="pct" id="pctHit">0%</span><span class="val" id="valHit">0</span></div>
-        <div class="row"><i class="swatch" style="background: var(--vscode-charts-blue, #58a6ff)"></i><span class="name">miss</span><span class="pct" id="pctMiss">0%</span><span class="val" id="valMiss">0</span></div>
-        <div class="row"><i class="swatch" style="background: var(--vscode-charts-purple, #bc8cff)"></i><span class="name">out</span><span class="pct" id="pctOut">0%</span><span class="val" id="valOut">0</span></div>
-        <div class="row total"><span class="name">total</span><span class="val" id="valTotal">0</span></div>
-        <div class="row cost"><span class="name">cost</span><span class="val" id="valCost">—</span></div>
+        <div class="row"><i class="swatch" style="background: var(--vscode-charts-green, #3fb950)"></i><span class="name">hit</span><span class="pct" id="pctHit">0%</span><span class="val" id="valHit">0</span><span class="cost" id="costHit">—</span></div>
+        <div class="row"><i class="swatch" style="background: var(--vscode-charts-blue, #58a6ff)"></i><span class="name">miss</span><span class="pct" id="pctMiss">0%</span><span class="val" id="valMiss">0</span><span class="cost" id="costMiss">—</span></div>
+        <div class="row"><i class="swatch" style="background: var(--vscode-charts-purple, #bc8cff)"></i><span class="name">out</span><span class="pct" id="pctOut">0%</span><span class="val" id="valOut">0</span><span class="cost" id="costOut">—</span></div>
+        <div class="row total"><span class="name">total</span><span class="val" id="valTotal">0</span><span class="cost" id="valCost">—</span></div>
       </div>
     </div>
     <div id="empty">No API calls recorded yet.<br />Each DeepSeek request adds one bar: output on top, input miss, then cache hit.</div>
@@ -328,6 +315,9 @@ function getHtml(webview: vscode.Webview): string {
       var valOut = document.getElementById('valOut');
       var valTotal = document.getElementById('valTotal');
       var valCost = document.getElementById('valCost');
+      var costHit = document.getElementById('costHit');
+      var costMiss = document.getElementById('costMiss');
+      var costOut = document.getElementById('costOut');
 
       var samples = [];
       var layout = null;
@@ -410,16 +400,74 @@ function getHtml(webview: vscode.Webview): string {
         return { hit: hit, miss: miss, output: output, total: hit + miss + output };
       }
 
+      var PEAK_WINDOWS_UTC = [[1, 4], [6, 10]];
+
       function hasPricing() {
-        return pricing !== null &&
-          (pricing.inputPerMillion > 0 || pricing.cachedPerMillion > 0 || pricing.outputPerMillion > 0);
+        if (pricing === null || !pricing.models) return false;
+        var models = pricing.models;
+        for (var key in models) {
+          if (!Object.prototype.hasOwnProperty.call(models, key)) continue;
+          var rates = models[key];
+          if (rates && (rates.cachedPerMillion > 0 || rates.inputPerMillion > 0 || rates.outputPerMillion > 0)) {
+            return true;
+          }
+        }
+        return false;
       }
 
-      function costOf(hit, miss, output) {
+      function utcDate(at) {
+        return at.toISOString().slice(0, 10);
+      }
+
+      function isPeak(at) {
+        if (!pricing || !(pricing.peakMultiplier > 1)) return false;
+        var day = at.getUTCDay();
+        if (day === 0 || day === 6) return false;
+        if ((pricing.holidays || []).indexOf(utcDate(at)) >= 0) return false;
+        var hour = at.getUTCHours();
+        for (var i = 0; i < PEAK_WINDOWS_UTC.length; i += 1) {
+          if (hour >= PEAK_WINDOWS_UTC[i][0] && hour < PEAK_WINDOWS_UTC[i][1]) return true;
+        }
+        return false;
+      }
+
+      function ratesFor(model) {
+        if (!pricing || !pricing.models) return null;
+        return pricing.models[model] || pricing.models[pricing.baseModel] || null;
+      }
+
+      /** One sample's cost split by token kind, or null when it has no rates. */
+      function sampleCostParts(sample) {
+        var rates = ratesFor(sample.model);
+        if (rates === null) return null;
+        var multiplier = isPeak(new Date(sample.at)) ? pricing.peakMultiplier : 1;
+        return {
+          hit: (sample.cacheHit / 1000000) * rates.cachedPerMillion * multiplier,
+          miss: (sample.cacheMiss / 1000000) * rates.inputPerMillion * multiplier,
+          out: (sample.output / 1000000) * rates.outputPerMillion * multiplier
+        };
+      }
+
+      /** One sample's cost, decided from its own model and timestamp. */
+      function sampleCost(sample) {
+        var parts = sampleCostParts(sample);
+        return parts === null ? null : parts.hit + parts.miss + parts.out;
+      }
+
+      /** The whole chart's cost, split by token kind: rates differ by model and hour. */
+      function totalsCostParts(list) {
         if (!hasPricing()) return null;
-        return (hit / 1000000) * pricing.cachedPerMillion +
-          (miss / 1000000) * pricing.inputPerMillion +
-          (output / 1000000) * pricing.outputPerMillion;
+        var sum = { hit: 0, miss: 0, out: 0 };
+        var priced = false;
+        for (var i = 0; i < list.length; i += 1) {
+          var parts = sampleCostParts(list[i]);
+          if (parts === null) continue;
+          sum.hit += parts.hit;
+          sum.miss += parts.miss;
+          sum.out += parts.out;
+          priced = true;
+        }
+        return priced ? sum : null;
       }
 
       function formatCost(value) {
@@ -488,13 +536,14 @@ function getHtml(webview: vscode.Webview): string {
           return;
         }
         var sum = totals();
-        var cost = costOf(sum.hit, sum.miss, sum.output);
+        var cost = totalsCostParts(samples);
+        var totalCost = cost === null ? null : cost.hit + cost.miss + cost.out;
         stats.textContent =
           samples.length + (samples.length === 1 ? ' call' : ' calls') +
           ' · in ' + compact(sum.hit) + ' hit / ' + compact(sum.miss) + ' miss' +
           ' · out ' + compact(sum.output) +
           ' · total ' + compact(sum.total) +
-          (cost === null ? '' : ' · ' + formatCost(cost));
+          (totalCost === null ? '' : ' · ' + formatCost(totalCost));
         pctHit.textContent = percent(sum.hit, sum.total);
         pctMiss.textContent = percent(sum.miss, sum.total);
         pctOut.textContent = percent(sum.output, sum.total);
@@ -502,7 +551,10 @@ function getHtml(webview: vscode.Webview): string {
         valMiss.textContent = compact(sum.miss);
         valOut.textContent = compact(sum.output);
         valTotal.textContent = compact(sum.total);
-        valCost.textContent = formatCost(cost);
+        costHit.textContent = formatCost(cost === null ? null : cost.hit);
+        costMiss.textContent = formatCost(cost === null ? null : cost.miss);
+        costOut.textContent = formatCost(cost === null ? null : cost.out);
+        valCost.textContent = formatCost(totalCost);
         donutCard.hidden = false;
         drawDonut(sum);
       }
@@ -595,14 +647,16 @@ function getHtml(webview: vscode.Webview): string {
         }
         var sample = samples[index];
         var model = sample.model.length > 0 ? sample.model : 'DeepSeek';
-        var cost = costOf(sample.cacheHit, sample.cacheMiss, sample.output);
+        var at = new Date(sample.at);
+        var cost = sampleCost(sample);
+        var peak = isPeak(at) ? ' (peak ×' + pricing.peakMultiplier + ')' : '';
         tooltip.textContent =
-          new Date(sample.at).toLocaleTimeString() + ' · ' + sample.source + ' · ' + model + '\\n' +
+          at.toLocaleTimeString() + ' · ' + sample.source + ' · ' + model + '\\n' +
           'total ' + sample.total.toLocaleString() + ' tokens\\n' +
           'cache hit ' + sample.cacheHit.toLocaleString() +
           ' · miss ' + sample.cacheMiss.toLocaleString() +
           ' · output ' + sample.output.toLocaleString() +
-          (cost === null ? '' : '\\ncost ' + formatCost(cost));
+          (cost === null ? '' : '\\ncost ' + formatCost(cost) + peak);
         tooltip.hidden = false;
 
         var pad = 12;

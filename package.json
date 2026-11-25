@@ -246,20 +246,39 @@
           "maximum": 3600,
           "description": "How long a Zero command may run before it is killed."
         },
+        "deepseek.advance.pricing.models": {
+          "type": "object",
+          "default": {},
+          "description": "Off-peak prices in dollars per million tokens, keyed by model id, for example { \"deepseek-v4-pro\": { \"inputPerMillion\": 0.66 } }. Models left out use the built-in DeepSeek prices."
+        },
+        "deepseek.advance.pricing.peakMultiplier": {
+          "type": "number",
+          "default": 2,
+          "minimum": 1,
+          "description": "Multiple of the off-peak prices charged in peak hours (01:00-04:00 and 06:00-10:00 UTC, Monday-Friday). Set to 1 to bill every hour at the off-peak rate."
+        },
+        "deepseek.advance.pricing.holidays": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "UTC dates (YYYY-MM-DD) billed at the off-peak rate all day, such as Chinese public holidays."
+        },
         "deepseek.advance.pricing.inputPerMillion": {
           "type": "number",
           "default": 0,
-          "description": "Dollars per million uncached input tokens, for the Zero panel's cost divider. Zero hides the figures."
+          "description": "Flat dollars per million uncached input tokens for every model. Non-zero replaces the built-in per-model table. Zero uses the table."
         },
         "deepseek.advance.pricing.cachedPerMillion": {
           "type": "number",
           "default": 0,
-          "description": "Dollars per million cache-hit input tokens."
+          "description": "Flat dollars per million cache-hit input tokens for every model. Non-zero replaces the built-in per-model table."
         },
         "deepseek.advance.pricing.outputPerMillion": {
           "type": "number",
           "default": 0,
-          "description": "Dollars per million output tokens."
+          "description": "Flat dollars per million output tokens for every model. Non-zero replaces the built-in per-model table."
         }
       }
     },
