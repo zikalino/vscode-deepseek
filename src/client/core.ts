@@ -4,6 +4,7 @@ import {
   type DeepSeekToolCall,
   type DeepSeekUsage,
   type StreamCallbacks,
+  MISSING_REASONING_CONTENT,
 } from '../types';
 import { Logger } from '../logger';
 import { httpError, networkError, unknownError, type DeepSeekErrorResult } from './error';
@@ -17,13 +18,15 @@ import { writeFailureDump } from '../deepseekFailures';
  */
 const ACCUMULATED_CONTENT_CAP = 4_000_000;
 
-/**
- * DeepSeek requires `reasoning_content` on every previous assistant turn when the
- * request carries `tools`. Host-synthesized tool turns (e.g. an automatic terminal
- * read) and turns where thinking was disabled have none, so a marker is sent in
- * their place instead of letting the API reject the whole request.
- */
-const MISSING_REASONING_CONTENT = '(no reasoning recorded for this turn)';
+export interface StreamOptions {
+  /**
+   * Include the request body in the info log. Off by default: a long agent
+   * conversation is several megabytes, and dumping it per turn rotates the
+   * output channel at 5 MB within a minute — exactly the diagnostics needed to
+   * explain a cache miss.
+   */
+  logPayload?: boolean;
+}
 
 /**
  * Zero-dependency SSE streaming client for DeepSeek Chat Completions API.
@@ -51,11 +54,21 @@ export class DeepSeekClient {
     apiKey: string,
     callbacks: StreamCallbacks,
     signal?: AbortSignal,
+    options?: StreamOptions,
   ): Promise<void> {
     const url = `${this.baseUrl}/chat/completions`;
     const wireRequest = this.toWireRequest(request);
     const requestBody = JSON.stringify(wireRequest);
-    this.log.info(`DeepSeek request POST ${url}\n${this.formatWirePayload(wireRequest, false)}`);
+    const wireMessages = Array.isArray(wireRequest.messages) ? wireRequest.messages.length : 0;
+    const wireTools = Array.isArray(wireRequest.tools) ? wireRequest.tools.length : 0;
+    const summary = `messages=${wireMessages} tools=${wireTools} bytes=${requestBody.length}`;
+    if (options?.logPayload) {
+      this.log.info(
+        `DeepSeek request POST ${url} ${summary}\n${this.formatWirePayload(wireRequest, true)}`,
+      );
+    } else {
+      this.log.info(`DeepSeek request POST ${url} ${summary}`);
+    }
 
     let failureDumped = false;
     try {

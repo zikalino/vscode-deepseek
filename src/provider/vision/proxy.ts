@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import type { VisionProxyStats } from '../../types';
 import { Logger } from '../../logger';
 import { SETTINGS_NS, IMAGE_DESCRIPTION_PROMPT } from '../../consts';
+import { imagePartsKey, isImagePart } from './descriptionKey';
 
 /**
  * Vision Proxy — resolves images by delegating to a vision-capable Copilot model.
@@ -9,6 +10,14 @@ import { SETTINGS_NS, IMAGE_DESCRIPTION_PROMPT } from '../../consts';
 export class VisionProxy {
   private log: Logger;
   private cachedModel: vscode.LanguageModelChatInformation | null = null;
+  /**
+   * Descriptions keyed by image content. A chat message that carries an image
+   * stays the "latest" one for every later turn, so without this cache the same
+   * image is described again on each request. Model output is not byte-stable,
+   * and a changed description rewrites the serialized history — which drops
+   * DeepSeek's prompt cache from that message on.
+   */
+  private descriptions = new Map<string, string>();
 
   constructor(log: Logger) {
     this.log = log;
@@ -35,109 +44,95 @@ export class VisionProxy {
       droppedImageParts: 0,
     };
 
-    // Find the last user message with images
-    let latestImageUserIdx = -1;
-    for (let i = messages.length - 1; i >= 0; i--) {
+    // Every user message that carries image parts, in conversation order.
+    const imageMessageIndices: number[] = [];
+    for (let i = 0; i < messages.length; i++) {
       const msg = messages[i];
       if ((msg as any).role !== 'user') continue;
-      const parts = (msg as any).content ?? [];
-      const hasImages = parts.some(
-        (p: any) => p.type === 'data' && p.mimeType?.startsWith('image/'),
-      );
-      if (hasImages) {
-        latestImageUserIdx = i;
-        break;
-      }
+      const imageParts = ((msg as any).content ?? []).filter(isImagePart);
+      if (imageParts.length === 0) continue;
+      imageMessageIndices.push(i);
+      stats.inputImageParts += imageParts.length;
+      stats.inputImageMessages++;
     }
 
-    // Count all image parts and messages
-    for (const msg of messages) {
-      const parts = (msg as any).content ?? [];
-      const imageParts = parts.filter(
-        (p: any) => p.type === 'data' && p.mimeType?.startsWith('image/'),
-      );
-      if (imageParts.length > 0) {
-        stats.inputImageParts += imageParts.length;
-        stats.inputImageMessages++;
-      }
-    }
-
-    // Count current (latest) image messages
-    for (let i = latestImageUserIdx; i >= 0 && i >= latestImageUserIdx; i--) {
-      const msg = messages[i];
-      if ((msg as any).role !== 'user') continue;
-      const parts = (msg as any).content ?? [];
-      const hasImages = parts.some(
-        (p: any) => p.type === 'data' && p.mimeType?.startsWith('image/'),
-      );
-      if (hasImages) stats.currentImageMessages++;
-    }
-
-    // Count replayed (not latest) and historical
-    for (let i = 0; i < latestImageUserIdx; i++) {
-      const msg = messages[i];
-      if ((msg as any).role !== 'user') continue;
-      const parts = (msg as any).content ?? [];
-      const hasImages = parts.some(
-        (p: any) => p.type === 'data' && p.mimeType?.startsWith('image/'),
-      );
-      if (hasImages) {
-        stats.replayedImageMessages++;
-      }
-    }
-
-    // Omitted historical
-    stats.omittedHistoricalMessages = stats.replayedImageMessages;
-
-    // Images before the latest user message are dropped (their descriptions
-    // only exist as text in previous assistant replies)
-    const droppedImages: number[] = [];
-    stats.droppedImageParts = 0;
-    for (let i = 0; i < latestImageUserIdx; i++) {
-      const msg = messages[i];
-      if ((msg as any).role !== 'user') continue;
-      const parts = (msg as any).content ?? [];
-      const imageParts = parts.filter(
-        (p: any) => p.type === 'data' && p.mimeType?.startsWith('image/'),
-      );
-      stats.droppedImageParts += imageParts.length;
-      droppedImages.push(i);
-    }
-
-    // If no images to resolve, return early
-    if (latestImageUserIdx < 0) {
-      // Check for replay markers with vision text
+    if (imageMessageIndices.length === 0) {
       return { resolvedMessages: [...messages], stats };
     }
 
-    // Resolve current images via vision proxy model
-    try {
-      const visionModel = await this.getVisionModel();
-      if (visionModel) {
-        const latestMsg = messages[latestImageUserIdx];
-        const description = await this.describeImages(latestMsg, visionModel);
-        if (description) {
-          // Build resolved messages: replace latest user's images with text, drop historical image messages
-          const resolvedMessages = messages.map((msg, idx) => {
-            if (idx === latestImageUserIdx) {
-              return this.replaceImagesWithText(msg, description);
-            }
-            if (droppedImages.includes(idx)) {
-              // Keep the message but remove image parts
-              return this.removeImages(msg);
-            }
-            return msg;
-          });
-          return { resolvedMessages, stats };
+    const latestImageUserIdx = imageMessageIndices[imageMessageIndices.length - 1];
+    stats.currentImageMessages = 1;
+    stats.replayedImageMessages = imageMessageIndices.length - 1;
+    stats.omittedHistoricalMessages = stats.replayedImageMessages;
+
+    /**
+     * Resolve the description for one image message. The latest message is
+     * described when its description is not cached yet; earlier messages only
+     * reuse text they resolved to before, so the serialized history stays
+     * byte-identical from one request to the next.
+     */
+    const describe = async (idx: number, generate: boolean): Promise<string | undefined> => {
+      const key = imagePartsKey((messages[idx] as any).content ?? []);
+      if (key !== undefined) {
+        const cached = this.descriptions.get(key);
+        if (cached !== undefined) {
+          return cached;
         }
       }
-      stats.failedMessages++;
-    } catch (err) {
-      this.log.warn('Vision proxy failed:', err);
-      stats.failedMessages++;
+      if (!generate) {
+        return undefined;
+      }
+
+      try {
+        const model = await this.getVisionModel();
+        if (!model) {
+          stats.unavailableMessages++;
+          return undefined;
+        }
+        const description = await this.describeImages(messages[idx], model);
+        if (!description) {
+          stats.failedMessages++;
+          return undefined;
+        }
+        if (key !== undefined) {
+          this.descriptions.set(key, description);
+        }
+        return description;
+      } catch (err) {
+        this.log.warn('Vision proxy failed:', err);
+        stats.failedMessages++;
+        return undefined;
+      }
+    };
+
+    const descriptions = new Map<number, string>();
+    const latestDescription = await describe(latestImageUserIdx, true);
+    if (latestDescription !== undefined) {
+      descriptions.set(latestImageUserIdx, latestDescription);
+    }
+    for (const idx of imageMessageIndices) {
+      if (idx === latestImageUserIdx) continue;
+      const description = await describe(idx, false);
+      if (description !== undefined) {
+        descriptions.set(idx, description);
+      }
     }
 
-    return { resolvedMessages: [...messages], stats };
+    const resolvedMessages = messages.map((msg, idx) => {
+      const description = descriptions.get(idx);
+      if (description !== undefined) {
+        return this.replaceImagesWithText(msg, description);
+      }
+      if (imageMessageIndices.includes(idx)) {
+        // No description was ever produced for this image: dropping it matches
+        // what earlier requests carried, instead of sending a fresh image.
+        stats.droppedImageParts += ((msg as any).content ?? []).filter(isImagePart).length;
+        return this.removeImages(msg);
+      }
+      return msg;
+    });
+
+    return { resolvedMessages, stats };
   }
 
   private async getVisionModel(): Promise<vscode.LanguageModelChatInformation | null> {

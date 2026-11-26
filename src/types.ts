@@ -82,6 +82,16 @@ export interface DeepSeekUsage {
   prompt_cache_miss_tokens?: number;
 }
 
+/**
+ * `reasoning_content` sent for an earlier assistant turn whose thinking VS Code
+ * does not replay. DeepSeek requires the field on every previous assistant turn
+ * when the request carries `tools`, so a fixed value is sent instead of letting
+ * the API reject the request. The value is constant on purpose: a turn that
+ * alternates between real reasoning and this marker rewrites the wire history
+ * and invalidates DeepSeek's prefix cache from that turn on.
+ */
+export const MISSING_REASONING_CONTENT = '(no reasoning recorded for this turn)';
+
 // ─── Streaming types ──────────────────────────────────────────
 
 export interface DeepSeekStreamChunk {
@@ -168,6 +178,19 @@ export interface ToolListChange {
   changed: boolean;
 }
 
+/**
+ * The first serialized message that differs between two requests. Unlike
+ * `prefixOverlap`, which compares raw VS Code text parts, this compares the
+ * messages actually sent to DeepSeek — `reasoning_content`, `tool_calls` and
+ * `tool_call_id` included.
+ */
+export interface WireDivergence {
+  index: number;
+  previousRole: string;
+  currentRole: string;
+  reason: 'role' | 'content' | 'reasoning' | 'toolCalls' | 'toolCallId';
+}
+
 export interface CacheDiagnostics {
   segmentId: string;
   segmentSource: 'markerFound' | 'markerMissing' | 'markerInvalid';
@@ -177,6 +200,14 @@ export interface CacheDiagnostics {
   messageContentSections: Record<string, number>;
   toolSchemaHashes: string[];
   prefixOverlapRatio?: number;
+  /** Share of the serialized wire messages shared with the previous request. */
+  wirePrefixOverlapRatio?: number;
+  /** First wire message that differs from the previous request's. */
+  wireDivergedAt?: WireDivergence;
+  /** Assistant turns whose `reasoning_content` was replayed from the cache. */
+  reasoningInjectedTurns?: number;
+  /** Assistant turns serialized with `MISSING_REASONING_CONTENT`. */
+  reasoningMarkerTurns?: number;
   visionStats?: VisionProxyStats;
   replayMarkerReported: boolean;
   /** Number of tool definitions in the serialized request. */

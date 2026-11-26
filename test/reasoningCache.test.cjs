@@ -66,15 +66,18 @@ test('the earliest turn keeps its reasoning after the cache is pruned', () => {
   assert.equal(found?.text, 'turn 0 reasoning');
 });
 
-test('positional reasoning is scoped to its conversation', () => {
+test('positional reasoning never decides the serialized history', () => {
+  // Regression: the positional fallback was pruned as the conversation grew, so
+  // an old turn could flip from its real reasoning to the placeholder and
+  // invalidate DeepSeek's cached prefix. Only content-addressed keys may decide
+  // what is sent back.
   const cache = new Map();
-  cache.set(reasoningIndexKey('conv-a', 0), { text: 'A', timestamp: 1 });
-  cache.set(reasoningIndexKey('conv-b', 0), { text: 'B', timestamp: 2 });
+  cache.set(reasoningIndexKey('conv-a', 0), { text: 'positional only', timestamp: 1 });
 
-  assert.equal(lookup(cache, { conversationId: 'conv-a' })?.text, 'A');
-  assert.equal(lookup(cache, { conversationId: 'conv-b' })?.text, 'B');
-  // A newly opened conversation must not inherit another one's positional entry.
-  assert.equal(lookup(cache, { conversationId: 'conv-c' }), undefined);
+  assert.equal(lookup(cache, { conversationId: 'conv-a', turnIndex: 0 }), undefined);
+
+  pruneReasoningCache(cache);
+  assert.equal(lookup(cache, { conversationId: 'conv-a', turnIndex: 0 }), undefined);
 });
 
 test('a content-addressed turn wins over a colliding positional entry', () => {

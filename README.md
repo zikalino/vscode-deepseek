@@ -106,7 +106,7 @@ Run **DeepSeek: Browse Failed Requests** from the command palette to list them. 
 
 **Prompt-cache diagnostics:**
 
-A request that misses most of the prompt cache is recorded as `.smartercode/deepseek-cache/last-miss.json`, with a timestamped copy of the newest 20. The record separates the three blocks that form the cached prefix — tool definitions, system message and conversation — reporting each block's size, fingerprint and what changed since the previous request (`tools` added/removed/reordered, `system.changed`, `messages.prefixOverlapRatio`). Token counts alone cannot tell "the conversation grew" from "the tool list was re-registered"; this record can.
+A request that misses most of the prompt cache is recorded as `.smartercode/deepseek-cache/last-miss.json`, with a timestamped copy of the newest 20. The record separates the three blocks that form the cached prefix — tool definitions, system message and conversation — reporting each block's size, fingerprint and what changed since the previous request (`tools` added/removed/reordered, `system.changed`, `messages.prefixOverlapRatio`). It also records the *serialized* history (`messages.wirePrefixOverlapRatio`, `messages.wireDivergedAt`) and how earlier assistant turns got their `reasoning_content` (`reasoning.injectedTurns` vs `reasoning.markerTurns`); `vision` is present when the request carried images. Token counts alone cannot tell "the conversation grew" from "the tool list was re-registered"; this record can.
 
 Tool definitions are also sorted by name before they are sent, so MCP registration timing or a subagent selection cannot reorder the prompt and invalidate the cache on every resume.
 
@@ -116,17 +116,19 @@ The output channel reports each turn's cache-miss (`M:`), cache-hit (`H:`) and o
 
 **Token usage graph:** run **DeepSeek: Show Token Usage Graph** (or press the graph icon in the Zero view's title bar) to open a live chart with one thin bar per API call. The bar's height is the call's total tokens; the stacked slices are output at the top, uncached input — the cache miss — in the middle, and cache-hit input at the bottom. Hover a bar for its exact counts, model, source and time. Each bar also carries a dollar cost, priced from its own model and hour: the built-in off-peak DeepSeek prices, doubled inside the peak windows (01:00–04:00 and 06:00–10:00 UTC, Monday–Friday) — a peak bar's tooltip says so. The chart updates as each request completes, for both Copilot turns and Zero turns. Samples are shared across VS Code windows and kept for the running VS Code session, and **Clear** empties them. The API itself is stateless, so a bar means one request, not one conversation total.
 
-For deeper diagnostics, set `deepseek-copilot.debugMode` to `"metadata"` or `"verbose"`; request summaries and token usage are logged to the DeepSeek output channel. In `"verbose"` mode each request also reports:
+For deeper diagnostics, set `deepseek-copilot.debugMode` to `"metadata"` or `"verbose"`; request summaries and token usage are logged to the DeepSeek output channel. In `"verbose"` mode the full request body is logged too (truncated); with the default `"minimal"`/`"metadata"` levels only the summary is written, because a long conversation's body is several megabytes and would rotate the output channel away within a minute. In `"verbose"` mode each request also reports:
 
-- `prefixOverlap` — share of the shorter message list shared with the previous request. `1.00` means the previous request was a prefix (a normal append); lower means history was dropped, reordered or re-serialized.
+- `prefixOverlap` — share of the shorter message list shared with the previous request. `1.00` means the previous request was a prefix (a normal append); lower means history was dropped, reordered or re-serialized. This compares raw text only, so tool results, tool calls and `reasoning_content` are invisible to it.
 - `divergedAt=#N(role->role a->b chars)` — the first message that differed, with its index, roles and text lengths.
+- `wireOverlap` / `wireDivergedAt=#N(role->role reason)` — the same comparison over the messages actually sent to DeepSeek, including tool calls, tool results and `reasoning_content` (`reason` is `role`, `content`, `reasoning`, `toolCalls` or `toolCallId`).
+- `reasoning=<n>injected/<m>marker` — earlier assistant turns whose reasoning was replayed from the cache, versus turns sent with the "(no reasoning recorded for this turn)" placeholder.
 - `contextShrank` — the message list got shorter without a differing message, i.e. turns were removed from the end.
 - `toolsChanged` — the ordered tool list differs from the previous request, which invalidates everything rendered after the system message.
 - On completion, `H:<hit>/<prompt> (<pct>%)` — cache-hit tokens against the whole prompt.
 
-A hit percentage far below `prefixOverlap` (or a `divergedAt` at a low index while the tail looks unchanged) points to a provider-side cache miss rather than a rewritten history.
+When the hit percentage is far below `wireOverlap`, the prefix DeepSeek saw was unchanged and the miss is provider-side. When `wireOverlap` is low while `prefixOverlap` is `1.00`, the extension rewrote the serialized history (or a pruned cache entry changed an old turn) and the whole tail was re-billed.
 
-**About prompt caching:** DeepSeek caches an exact prompt *prefix* in 64-token blocks. Tool definitions render after the system message, so any change in the system prompt invalidates every tool schema behind it. VS Code puts a fresh session UUID in the system prompt on each new conversation, which used to cost roughly 30k cached tokens per new chat; `deepseek-copilot.stabilizePromptCache` (enabled by default) normalizes that UUID so the prefix survives.
+**About prompt caching:** DeepSeek caches an exact prompt *prefix* in 64-token blocks. Tool definitions render after the system message, so any change in the system prompt invalidates every tool schema behind it. VS Code puts a fresh session UUID in the system prompt on each new conversation, which used to cost roughly 30k cached tokens per new chat; `deepseek-copilot.stabilizePromptCache` (enabled by default) normalizes that UUID so the prefix survives. Earlier assistant turns are replayed with their `reasoning_content`, matched only by content-addressed keys (tool-call id, then response text) so pruning can never rewrite a turn, and an image is described once and reused verbatim, so the conversation sent to DeepSeek stays byte-stable across requests.
 
 ---
 

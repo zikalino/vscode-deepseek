@@ -5,19 +5,16 @@ import type { ReasoningEntry } from '../types';
  *
  * DeepSeek requires `reasoning_content` to be echoed back on every assistant
  * turn when the request carries `tools`; a missing value is a 400 ("Request
- * body format error"). Assistant turns are matched by tool-call id first
- * (stable across requests), then by response text, then by position.
- *
- * The first two kinds of key are content-addressed: they describe a turn and
- * stay valid for every request and every conversation. The positional key is
- * only an in-memory last resort and is scoped to one conversation, because a
- * request from another conversation must never be able to rewrite an earlier
- * assistant turn.
+ * body format error"). Assistant turns are matched only by content-addressed
+ * keys: a tool-call id first, then the response text.
  *
  * Mutating an assistant message after it has been sent breaks DeepSeek's
  * prefix cache: the cache dies where the change is and everything after it is
- * re-billed. Callers must therefore keep the serialized history stable, which
- * is why pruning never drops content-addressed entries.
+ * re-billed. The lookup used to fall back to a positional key, but that entry is
+ * pruned while the conversation grows and is not persisted, so an old turn could
+ * silently flip from real reasoning to the placeholder (`MISSING_REASONING_CONTENT`)
+ * — rewriting hundreds of thousands of tokens of prefix. Positional entries are
+ * still kept for inspection, but they never influence the serialized request.
  */
 
 export function reasoningToolCallKey(toolCallId: string): string {
@@ -68,7 +65,9 @@ export function lookupReasoning(
     }
   }
 
-  return reasoningCache.get(reasoningIndexKey(lookup.conversationId, lookup.turnIndex));
+  // Positional entries are deliberately not consulted: they are pruned as the
+  // conversation grows, so using them would rewrite earlier assistant turns.
+  return undefined;
 }
 
 /**

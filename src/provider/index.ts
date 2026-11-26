@@ -3,12 +3,14 @@ import { MODELS, VENDOR_ID, SECRET_KEY, SETTINGS_NS, COPILOT_SETTINGS_NS, DEFAUL
 import {
   type ModelDefinition,
   type DeepSeekRequest,
+  type DeepSeekMessage,
   type ReasoningEntry,
   type ReasoningHistoryState,
   type DeepSeekTool,
   type DeepSeekUsage,
   type CacheDiagnostics,
   type ToolListChange,
+  type VisionProxyStats,
 } from '../types';
 import { Logger } from '../logger';
 import { AuthManager } from '../auth';
@@ -32,6 +34,8 @@ import { classifyRequest } from './debug/classifier';
 import {
   buildCacheDiagnostics,
   compareMessagePrefix,
+  compareWireMessages,
+  countSerializedReasoning,
   summarizeRequestSections,
   type MessagePrefixComparison,
 } from './debug/diagnostics';
@@ -104,6 +108,8 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
   private charsPerToken: number = DEFAULT_CHARS_PER_TOKEN;
   private reasoningCache: Map<string, ReasoningEntry> = new Map();
   private prevMessages: readonly vscode.LanguageModelChatRequestMessage[] | undefined;
+  /** Serialized messages of the previous request, for wire-level cache diagnostics. */
+  private prevWireMessages: DeepSeekMessage[] | undefined;
   /** Ordered tool names from the previous request, for cache-miss diagnostics. */
   private prevToolNames: string[] | undefined;
   /** Fingerprint of the previous request's normalized system message. */
@@ -268,15 +274,18 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
     // 5. Classify request
     const kind = classifyRequest(messages, options.tools);
 
-    // 6. Message-prefix diagnostics (the system and tool blocks are measured
+    // 6. Vision proxy. It rewrites image messages, so it must run before the
+    //    prefix comparison — otherwise the diagnostics compare raw messages
+    //    while a different message list is what reaches the wire.
+    const { resolvedMessages: visionMessages, stats: visionStats } =
+      await this.vision.resolveImages(messages);
+
+    // 7. Message-prefix diagnostics (the system and tool blocks are measured
     //    after conversion, once their wire form is known)
-    const prefix = compareMessagePrefix(this.prevMessages, messages, {
+    const prefix = compareMessagePrefix(this.prevMessages, visionMessages, {
       normalizeSessionContext: this.stabilizePromptCache(),
     });
-    this.prevMessages = messages;
-
-    // 7. Vision proxy
-    const { resolvedMessages: visionMessages } = await this.vision.resolveImages(messages);
+    this.prevMessages = visionMessages;
 
     // 8. Tool flow
     const vsCodeTools = options.tools ?? [];
@@ -320,15 +329,19 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
     const request = await this.buildRequest(modelDef, processedMessages, deepseekTools, options, kind, conversationId);
 
     // 10. Cache diagnostics, then stream
+    const wirePrefix = compareWireMessages(this.prevWireMessages, request.messages);
+    this.prevWireMessages = request.messages;
     const diagnostics = this.collectCacheDiagnostics(
       kind,
       segmentId,
       messages,
       request,
       prefix,
+      wirePrefix,
+      visionStats,
       debugMode,
     );
-    await this.streamResponse(client, request, apiKey, modelDef, progress, token, kind, diagnostics, conversationId);
+    await this.streamResponse(client, request, apiKey, modelDef, progress, token, kind, diagnostics, conversationId, debugMode);
   }
 
   /** Measure the wire request and attribute any cache miss to the block that changed. */
@@ -338,6 +351,8 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
     messages: readonly vscode.LanguageModelChatRequestMessage[],
     request: DeepSeekRequest,
     prefix: MessagePrefixComparison | undefined,
+    wirePrefix: MessagePrefixComparison | undefined,
+    visionStats: VisionProxyStats | undefined,
     debugMode: string,
   ): CacheDiagnostics {
     const sections = summarizeRequestSections(request);
@@ -345,9 +360,21 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
     const systemChanged =
       this.prevSystemHash !== undefined && this.prevSystemHash !== sections.systemHash;
     this.prevSystemHash = sections.systemHash;
+    const reasoning = countSerializedReasoning(request.messages, (request.tools?.length ?? 0) > 0);
 
-    const diagnostics = buildCacheDiagnostics(segmentId, 'markerMissing', messages);
+    const diagnostics = buildCacheDiagnostics(segmentId, 'markerMissing', messages, visionStats);
     diagnostics.prefixOverlapRatio = prefix?.ratio;
+    diagnostics.wirePrefixOverlapRatio = wirePrefix?.ratio;
+    diagnostics.wireDivergedAt = wirePrefix?.divergedAt
+      ? {
+          index: wirePrefix.divergedAt.index,
+          previousRole: wirePrefix.divergedAt.previousRole,
+          currentRole: wirePrefix.divergedAt.currentRole,
+          reason: wirePrefix.divergedAt.reason ?? 'content',
+        }
+      : undefined;
+    diagnostics.reasoningInjectedTurns = reasoning.injected;
+    diagnostics.reasoningMarkerTurns = reasoning.marker;
     diagnostics.toolCount = sections.toolNames.length;
     diagnostics.toolsChars = sections.toolsChars;
     diagnostics.toolsHash = sections.toolsHash;
@@ -385,7 +412,37 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
           details.push('contextShrank');
         }
       }
+      if (wirePrefix) {
+        details.push(`wireOverlap=${wirePrefix.ratio.toFixed(2)}`);
+        if (wirePrefix.divergedAt) {
+          const d = wirePrefix.divergedAt;
+          details.push(`wireDivergedAt=#${d.index}(${d.previousRole}->${d.currentRole} ${d.reason})`);
+        }
+      }
+      details.push(`reasoning=${reasoning.injected}injected/${reasoning.marker}marker`);
+      if (visionStats && visionStats.inputImageParts > 0) {
+        details.push(
+          `images=${visionStats.inputImageParts}/${visionStats.inputImageMessages}msg ` +
+            `dropped=${visionStats.droppedImageParts}`,
+        );
+      }
       this.log.info(details.join(' '));
+    }
+
+    // A perfect raw-text overlap with a broken wire prefix is the signature of a
+    // history rewrite: tool results, tool calls or reasoning_content changed
+    // while the visible text did not. DeepSeek re-bills every token after it.
+    if (
+      wirePrefix?.divergedAt &&
+      wirePrefix.ratio < 0.9 &&
+      (prefix?.ratio ?? 1) >= 0.9
+    ) {
+      const d = wirePrefix.divergedAt;
+      this.log.warn(
+        `Serialized history diverged at #${d.index} (${d.reason}) while the raw messages matched. ` +
+          'The DeepSeek prefix cache will miss from that message on; wireOverlap=' +
+          `${wirePrefix.ratio.toFixed(2)} prefixOverlap=${(prefix?.ratio ?? 1).toFixed(2)}.`,
+      );
     }
 
     return diagnostics;
@@ -531,6 +588,7 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
     kind: string,
     diagnostics: CacheDiagnostics,
     conversationId: string,
+    debugMode: string,
   ): Promise<void> {
     // Track reasoning text for caching
     let fullReasoningText = '';
@@ -633,7 +691,9 @@ export class DeepSeekChatProvider implements vscode.LanguageModelChatProvider {
         },
       };
 
-      await client.streamChatCompletion(request, apiKey, callbacks, abortController.signal);
+      await client.streamChatCompletion(request, apiKey, callbacks, abortController.signal, {
+        logPayload: debugMode === 'verbose',
+      });
     } finally {
       disposable.dispose();
     }

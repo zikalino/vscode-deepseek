@@ -1,7 +1,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { getCacheDiagnosticsDir, type FailureLogger } from '../../deepseekFailures';
-import type { CacheDiagnostics, DeepSeekUsage, ToolListChange } from '../../types';
+import type {
+  CacheDiagnostics,
+  DeepSeekUsage,
+  ToolListChange,
+  VisionProxyStats,
+  WireDivergence,
+} from '../../types';
 
 /**
  * One significant prompt-cache miss, written to `.smartercode/deepseek-cache/`.
@@ -35,11 +41,23 @@ export interface CacheMissRecord {
   messages: {
     count: number;
     chars?: number;
+    /** Share of the raw VS Code text content shared with the previous request. */
     prefixOverlapRatio?: number;
+    /** Share of the serialized messages shared with the previous request. */
+    wirePrefixOverlapRatio?: number;
+    /** First serialized message that differs from the previous request's. */
+    wireDivergedAt?: WireDivergence;
     toolArgChars?: number;
     reasoningChars?: number;
     byRole?: Record<string, number>;
   };
+  /** How the assistant turns got their `reasoning_content`. */
+  reasoning?: {
+    injectedTurns: number;
+    markerTurns: number;
+  };
+  /** Image handling for this request; absent when the request had no images. */
+  vision?: VisionProxyStats;
 }
 
 /** Keep a handful of records; a cache miss is rare and each record is small. */
@@ -94,10 +112,21 @@ export function buildCacheMissRecord(
       count: Object.values(diagnostics.messageCountByRole).reduce((sum, n) => sum + n, 0),
       chars: diagnostics.messageChars,
       prefixOverlapRatio: diagnostics.prefixOverlapRatio,
+      wirePrefixOverlapRatio: diagnostics.wirePrefixOverlapRatio,
+      wireDivergedAt: diagnostics.wireDivergedAt,
       toolArgChars: diagnostics.toolCallArgChars,
       reasoningChars: diagnostics.reasoningContentChars,
       byRole: diagnostics.messageCountByRole,
     },
+    reasoning:
+      diagnostics.reasoningInjectedTurns === undefined &&
+      diagnostics.reasoningMarkerTurns === undefined
+        ? undefined
+        : {
+            injectedTurns: diagnostics.reasoningInjectedTurns ?? 0,
+            markerTurns: diagnostics.reasoningMarkerTurns ?? 0,
+          },
+    vision: diagnostics.visionStats,
   };
 }
 

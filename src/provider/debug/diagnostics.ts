@@ -1,5 +1,6 @@
 import type * as vscode from 'vscode';
-import type { CacheDiagnostics, DeepSeekRequest, VisionProxyStats } from '../../types';
+import type { CacheDiagnostics, DeepSeekMessage, DeepSeekRequest, VisionProxyStats, WireDivergence } from '../../types';
+import { MISSING_REASONING_CONTENT } from '../../types';
 import { normalizeSessionContext } from '../convert';
 
 /**
@@ -128,8 +129,10 @@ export interface MessagePrefixComparison {
     index: number;
     previousRole: string;
     currentRole: string;
-    previousChars: number;
-    currentChars: number;
+    previousChars?: number;
+    currentChars?: number;
+    /** Which serialized field differs (set by `compareWireMessages`). */
+    reason?: WireDivergence['reason'];
   };
 }
 
@@ -187,4 +190,110 @@ function extractText(msg: vscode.LanguageModelChatRequestMessage, normalizeSyste
     return normalizeSessionContext(text);
   }
   return text;
+}
+
+interface WireMessageSignature {
+  role: string;
+  content: string;
+  reasoning: string;
+  toolCallId: string;
+  toolCalls: string;
+}
+
+function wireSignature(message: DeepSeekMessage): WireMessageSignature {
+  const toolCalls = Array.isArray(message.tool_calls)
+    ? message.tool_calls
+        .map((call) => `${call.id}\u0000${call.function?.name ?? ''}\u0000${call.function?.arguments ?? ''}`)
+        .join('\u0001')
+    : '';
+  return {
+    role: String(message.role),
+    content: typeof message.content === 'string' ? message.content : '',
+    reasoning: typeof message.reasoning_content === 'string' ? message.reasoning_content : '',
+    toolCallId: typeof message.tool_call_id === 'string' ? message.tool_call_id : '',
+    toolCalls,
+  };
+}
+
+/**
+ * Compare the serialized messages of two consecutive requests.
+ *
+ * `compareMessagePrefix` only looks at raw `text` parts, so it reports a perfect
+ * overlap while `reasoning_content`, `tool_calls` or tool results are being
+ * rewritten — a condition that re-bills the entire conversation because
+ * DeepSeek caches an exact prompt prefix. This is the view that can see that.
+ */
+export function compareWireMessages(
+  previous: readonly DeepSeekMessage[] | undefined,
+  current: readonly DeepSeekMessage[],
+): MessagePrefixComparison | undefined {
+  if (!previous || previous.length === 0 || current.length === 0) {
+    return undefined;
+  }
+
+  const compared = Math.min(previous.length, current.length);
+  let matched = 0;
+  let divergedAt: MessagePrefixComparison['divergedAt'];
+
+  for (let i = 0; i < compared; i++) {
+    const before = wireSignature(previous[i]);
+    const after = wireSignature(current[i]);
+    const reason: WireDivergence['reason'] | undefined =
+      before.role !== after.role
+        ? 'role'
+        : before.content !== after.content
+          ? 'content'
+          : before.reasoning !== after.reasoning
+            ? 'reasoning'
+            : before.toolCallId !== after.toolCallId
+              ? 'toolCallId'
+              : before.toolCalls !== after.toolCalls
+                ? 'toolCalls'
+                : undefined;
+    if (reason === undefined) {
+      matched++;
+      continue;
+    }
+    divergedAt = {
+      index: i,
+      previousRole: before.role,
+      currentRole: after.role,
+      previousChars: before.content.length + before.reasoning.length,
+      currentChars: after.content.length + after.reasoning.length,
+      reason,
+    };
+    break;
+  }
+
+  return {
+    ratio: matched / compared,
+    matched,
+    previousCount: previous.length,
+    currentCount: current.length,
+    divergedAt,
+  };
+}
+
+/** How the assistant turns in a serialized request got their `reasoning_content`. */
+export function countSerializedReasoning(
+  messages: readonly DeepSeekMessage[],
+  requireReasoningContent = false,
+): {
+  injected: number;
+  marker: number;
+} {
+  let injected = 0;
+  let marker = 0;
+  for (const message of messages) {
+    if (message.role !== 'assistant') continue;
+    const reasoning = typeof message.reasoning_content === 'string' ? message.reasoning_content : '';
+    if (reasoning.length === 0) {
+      // `normalizeMessages` fills this in whenever the request carries tools.
+      if (requireReasoningContent) marker++;
+      continue;
+    }
+    if (reasoning === MISSING_REASONING_CONTENT) marker++;
+    else injected++;
+  }
+  return { injected, marker };
 }
