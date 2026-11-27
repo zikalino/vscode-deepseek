@@ -1,6 +1,6 @@
 {
   "name": "vscode-deepseek-obsidian",
-  "version": "0.0.50",
+  "version": "0.0.51",
   "description": "DeepSeek-powered coding assistant for VS Code with Copilot integration and an autonomous Zero panel.",
   "license": "ISC",
   "author": "",
@@ -13,7 +13,7 @@
   "main": "./out/extension.js",
   "scripts": {
     "prepare:shared-components": "node ./scripts/materialize-shared-components.js",
-    "precompile": "npm run prepare:shared-components",
+    "precompile": "npm run prepare:shared-components && node ./scripts/copy-advance-wasm.js",
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",

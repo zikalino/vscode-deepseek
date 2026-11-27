@@ -4,6 +4,7 @@ const { test } = require('node:test');
 const {
   DEFAULT_PEAK_MULTIPLIER,
   costOf,
+  costPartsOf,
   defaultRules,
   hasRates,
   isPeak,
@@ -66,7 +67,12 @@ test('each model is priced from its own row', () => {
 
 test('an unpriced model falls back to the base model', () => {
   const r = rules({ baseModel: 'deepseek-v4-pro' });
-  approx(costOf('deepseek-chat', MONDAY(12), ONE_MILLION_MISS, r), 0.66);
+  approx(costOf('some-unpriced-model', MONDAY(12), ONE_MILLION_MISS, r), 0.66);
+});
+
+test('the public model ids are aliases of the v4 tiers', () => {
+  approx(costOf('deepseek-chat', MONDAY(12), ONE_MILLION_MISS, rules()), 0.15);
+  approx(costOf('deepseek-reasoner', MONDAY(12), ONE_MILLION_MISS, rules()), 0.66);
 });
 
 test('per-model overrides only replace the fields they name', () => {
@@ -98,6 +104,20 @@ test('costs add up across all three token kinds', () => {
     ),
     0.003 + 0.15 + 0.6,
   );
+});
+
+test('the per-slice split is the total and keeps peak on every slice', () => {
+  const parts = costPartsOf(
+    'deepseek-v4-flash',
+    MONDAY(2),
+    { cacheHit: 1_000_000, cacheMiss: 1_000_000, output: 1_000_000 },
+    rules(),
+  );
+  assert.ok(parts !== null);
+  approx(parts.hit, 0.006);
+  approx(parts.miss, 0.3);
+  approx(parts.out, 1.2);
+  approx(parts.total, 0.006 + 0.3 + 1.2);
 });
 
 test('hasRates is false only when every rate is zero', () => {

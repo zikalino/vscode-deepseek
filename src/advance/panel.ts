@@ -11,7 +11,6 @@
 // `deepseek.model`, and the key in SecretStorage); the sandbox is configured under
 // `deepseek.advance.*`.
 
-import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import * as path from "node:path";
 import { Worker } from "node:worker_threads";
@@ -29,7 +28,10 @@ import { discoverCustomTools, findCustomToolDocument } from "./customTools";
 import { ensureGallery, GALLERY_DIR_NAME } from "./galleryRepo";
 import { isWorkflowDocumentId, readWorkflowDocument } from "./workflowFiles";
 import { runWorkflowDocument } from "./workflowRunner";
+import { panelHtml } from "./webview";
 import { discoverWorkflowCatalogue, findWorkflowToolDocument } from "./workflows";
+
+export { panelHtml } from "./webview";
 
 export { advanceSettings, readApiKey, resolveHarnessWasm } from "./settings";
 export type { AdvanceSettings } from "./settings";
@@ -714,41 +716,6 @@ class Panel implements vscode.WebviewViewProvider, AdvanceBridge {
       this.postStatus(`could not open the message: ${describe(error)}`);
     }
   }
-}
-
-/** The canvas page every Advance webview hosts; only the title differs. */
-export function panelHtml(webview: vscode.Webview, media: vscode.Uri, title: string): string {
-  const nonce = randomBytes(16).toString("base64");
-  const style = webview.asWebviewUri(vscode.Uri.joinPath(media, "panel.css"));
-  const theme = webview.asWebviewUri(vscode.Uri.joinPath(media, "theme.js"));
-  const script = webview.asWebviewUri(vscode.Uri.joinPath(media, "panel.js"));
-  const label = escapeHtml(title);
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
-<link rel="stylesheet" href="${style}">
-<title>${label}</title>
-</head>
-<body>
-<div id="app">
-  <canvas id="screen" tabindex="0" aria-label="${label}"></canvas>
-  <span id="status" role="status"></span>
-</div>
-<script nonce="${nonce}" src="${theme}"></script>
-<script nonce="${nonce}" src="${script}"></script>
-</body>
-</html>`;
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 /** Register the Advance panel, its commands, and its configuration listener. */

@@ -28,6 +28,11 @@ export interface TokenCounts {
 export const BASE_RATES: Readonly<Record<string, ModelRates>> = {
   'deepseek-v4-flash': { cachedPerMillion: 0.003, inputPerMillion: 0.15, outputPerMillion: 0.6 },
   'deepseek-v4-pro': { cachedPerMillion: 0.022, inputPerMillion: 0.66, outputPerMillion: 1.98 },
+  // The public API still names the same tiers `deepseek-chat` and `deepseek-reasoner`. They are
+  // aliases, not a second price list: the native host uses `deepseek-chat` by default and must show
+  // the same money as the v4 ids.
+  'deepseek-chat': { cachedPerMillion: 0.003, inputPerMillion: 0.15, outputPerMillion: 0.6 },
+  'deepseek-reasoner': { cachedPerMillion: 0.022, inputPerMillion: 0.66, outputPerMillion: 1.98 },
 };
 
 export const DEFAULT_MODEL = 'deepseek-v4-flash';
@@ -120,6 +125,41 @@ export function ratesFor(model: string, rules: PricingRules): ModelRates | undef
   return rules.models[model] ?? rules.models[rules.baseModel];
 }
 
+/** A request's cost split by the three token kinds, before it is turned into text. */
+export interface CostParts {
+  /** All three slices, in dollars. */
+  total: number;
+  /** Cache-hit input. */
+  hit: number;
+  /** Uncached input. */
+  miss: number;
+  /** Completion tokens. */
+  out: number;
+}
+
+/**
+ * One request's cost split by slice, or null when its model has no rates.
+ *
+ * The wasm Usage panel is handed the split rather than the token counts: it lays the money out but
+ * does not own the rates, so the extension and the desktop shell can price the same sample.
+ */
+export function costPartsOf(
+  model: string,
+  atMs: number,
+  tokens: TokenCounts,
+  rules: PricingRules,
+): CostParts | null {
+  const rates = ratesFor(model, rules);
+  if (!rates) {
+    return null;
+  }
+  const multiplier = isPeak(atMs, rules) ? rules.peakMultiplier : 1;
+  const hit = ((tokens.cacheHit * rates.cachedPerMillion) / 1_000_000) * multiplier;
+  const miss = ((tokens.cacheMiss * rates.inputPerMillion) / 1_000_000) * multiplier;
+  const out = ((tokens.output * rates.outputPerMillion) / 1_000_000) * multiplier;
+  return { total: hit + miss + out, hit, miss, out };
+}
+
 /** Cost in dollars of one request, or null when its model has no rates. */
 export function costOf(
   model: string,
@@ -127,16 +167,7 @@ export function costOf(
   tokens: TokenCounts,
   rules: PricingRules,
 ): number | null {
-  const rates = ratesFor(model, rules);
-  if (!rates) {
-    return null;
-  }
-  const priced =
-    tokens.cacheHit * rates.cachedPerMillion +
-    tokens.cacheMiss * rates.inputPerMillion +
-    tokens.output * rates.outputPerMillion;
-  const multiplier = isPeak(atMs, rules) ? rules.peakMultiplier : 1;
-  return (priced / 1_000_000) * multiplier;
+  return costPartsOf(model, atMs, tokens, rules)?.total ?? null;
 }
 
 /** True when at least one model is priced, so a cost can be shown at all. */
