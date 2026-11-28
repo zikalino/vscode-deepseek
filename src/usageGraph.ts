@@ -15,7 +15,7 @@ import * as vscode from "vscode";
 
 import type { UsageWorkerOptions, UsageWorkerRequest, UsageWorkerResponse } from "./advance/usageProtocol";
 import { panelHtml } from "./advance/webview";
-import { costPartsOf, type PricingRules } from "./pricing";
+import { costPartsOf, isPeak, type PricingRules } from "./pricing";
 import { readPricingRules } from "./pricingSettings";
 import {
   getUsageJournal,
@@ -144,9 +144,17 @@ function openUsageGraph(context: vscode.ExtensionContext): void {
     return { samples: getUsageRecorder().snapshot(), offset: 0 };
   };
 
+  // The module has no clock. Each poll says what time it is, and whether that hour bills at peak
+  // rates, so the badge flips at the boundary without waiting for the next call.
+  const clockEvent = (): Record<string, unknown> => {
+    const at = Date.now();
+    return { op: "clock", at, peak: isPeak(at, readPricingRules()) };
+  };
+
   const sendReset = (): void => {
     const all = readAll();
     offset = all.offset;
+    toWorker({ type: "input", event: clockEvent() });
     toWorker({
       type: "input",
       event: { op: "usageReset", samples: priced(all.samples, readPricingRules()) },
@@ -240,6 +248,8 @@ function openUsageGraph(context: vscode.ExtensionContext): void {
       if (disposed || worker === undefined || !workerReady) {
         return;
       }
+      // The badge follows the hour even when no call arrives.
+      toWorker({ type: "input", event: clockEvent() });
       const slice = journal.read(offset);
       offset = slice.offset;
       if (slice.reset) {
@@ -262,6 +272,7 @@ function openUsageGraph(context: vscode.ExtensionContext): void {
       if (disposed || worker === undefined || !workerReady) {
         return;
       }
+      toWorker({ type: "input", event: clockEvent() });
       toWorker({
         type: "input",
         event: { op: "usageAppend", samples: priced(samples, readPricingRules()) },
